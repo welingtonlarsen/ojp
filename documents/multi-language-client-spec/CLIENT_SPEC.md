@@ -92,41 +92,53 @@ The client must implement stubs for every RPC in `StatementService` and `EchoSer
 
 ---
 
-## 2. URL Parsing
+## 2. Connection Configuration and Building ConnectionDetails
 
-### URL format
+### What the client collects from the user
+
+A non-Java OJP client does not use a JDBC URL. Instead, it collects the following configuration items directly from the user or from a configuration file:
+
+| Item | Required | Description |
+|---|---|---|
+| OJP server endpoints | Yes | One or more `host:port` pairs for the OJP server(s). In multinode mode this is a list. |
+| Datasource name | No | A logical name for this datasource, default `"default"`. Used to keep separate connection pools per named datasource on the same server. |
+| Database URL | Yes | The connection URL for the **real database** that the OJP server will connect to (e.g., `jdbc:postgresql://db:5432/mydb`). This is sent verbatim to the server. |
+| User | Yes | Database username. |
+| Password | Yes | Database password. |
+| Properties | No | Additional key-value configuration pairs (pool sizing, cache rules, etc. — see §22, §23). |
+
+### Building the `ConnectionDetails` message
+
+Map the collected configuration to the `ConnectionDetails` proto fields as follows:
+
+| Proto field | Type | Value |
+|---|---|---|
+| `url` | `string` | The **actual database URL** (e.g., `jdbc:postgresql://db:5432/mydb`). The server uses this to create the real database connection pool. |
+| `user` | `string` | Database username. |
+| `password` | `string` | Database password. |
+| `clientUUID` | `string` | Stable process UUID (see §3). |
+| `properties` | `repeated PropertyEntry` | Configuration key-value pairs; include `ojp.datasource.name = <datasourceName>` when using a named datasource. |
+| `serverEndpoints` | `repeated string` | All OJP server addresses as `"host:port"` strings (the full cluster list, not just the chosen endpoint). |
+| `clusterHealth` | `string` | Current cluster health string (see §11); empty string on the very first connect. |
+| `isXA` | `bool` | `true` for XA connections, `false` otherwise. |
+
+> **Important:** the `url` field must be consistent across all client processes that connect to the same logical datasource. The server computes `connHash` as SHA-256(`url + user + password + datasource_name`). If different clients send different `url` strings for the same database, the server creates separate pools.
+
+### `connHash` cache key (client side)
+
+The client caches the `connHash` returned by the server after the first `connect()` RPC. The local lookup key for this cache is:
 
 ```
-jdbc:ojp[host:port(datasourceName),host2:port2(datasourceName2)]_actual-db-url
+url + "|" + user + "|" + password + "|" + datasource_name
 ```
 
-All three parts are mandatory:
-- `jdbc:ojp` — fixed prefix that identifies the driver.
-- `[...]` — bracket-enclosed, comma-separated list of OJP server endpoints. Each endpoint is `host:port`, optionally followed by a datasource name in parentheses: `host:port(dsName)`.
-- `_` — separator between the OJP section and the actual database URL.
-- `actual-db-url` — the full database URL that the server will use to connect to the real database (e.g., `postgresql://localhost:5432/mydb`).
-
-### Parsing rules
-
-1. **Extract the endpoint list** by capturing everything between `[` and `]`.
-2. **Split by comma** to enumerate endpoints. Trim whitespace around each item.
-3. **For each endpoint**, split on `:` to obtain host and port. If a `(dsName)` suffix is present, strip it and record the datasource name; default is `"default"`.
-4. **Validate** that host is non-empty, port is an integer in `[1, 65535]`, and at least one endpoint is present.
-5. **Extract the actual database URL** by removing everything up to and including the first `]_` pattern.
-6. **Produce a single-endpoint URL** for use in `ConnectionDetails.url` by replacing `[host1:port1,host2:port2]` with `[chosen_host:chosen_port]` (the endpoint actually selected for the first connection). This stripped URL is forwarded to the server; the server never sees the multinode list.
-
-### Examples
-
-| Input | Endpoints | Datasource names | Actual DB URL |
-|---|---|---|---|
-| `jdbc:ojp[localhost:10591]_postgresql://db:5432/mydb` | `localhost:10591` | `default` | `postgresql://db:5432/mydb` |
-| `jdbc:ojp[a:1059,b:1059]_h2:mem:test` | `a:1059`, `b:1059` | `default`, `default` | `h2:mem:test` |
-| `jdbc:ojp[a:1059(web),b:1059(analytics)]_postgresql://db/mydb` | `a:1059`, `b:1059` | `web`, `analytics` | `postgresql://db/mydb` |
+Use the same `url` string that was placed in `ConnectionDetails.url` so the cache key matches the server's `connHash` computation.
 
 > **Reference implementation:**
-> - `ojp-jdbc-driver` — [`MultinodeUrlParser`](../../ojp-jdbc-driver/src/main/java/org/openjproxy/grpc/client/MultinodeUrlParser.java): `parseServerEndpoints(url, dataSourceNames)` parses the bracket-enclosed endpoint list; `extractActualJdbcUrl(url)` strips the OJP prefix; `replaceBracketsWithSingleEndpoint(url, endpoint)` produces the single-endpoint URL forwarded to the server; `getOrCreateStatementService(url)` is the main entry point that ties parsing to channel creation.
-> - `ojp-jdbc-driver` — [`UrlParser`](../../ojp-jdbc-driver/src/main/java/org/openjproxy/jdbc/UrlParser.java): `parseUrlWithDataSource(url)` handles single-node URL parsing and datasource name extraction.
-> - `ojp-jdbc-driver` — [`Driver.connect(url, info)`](../../ojp-jdbc-driver/src/main/java/org/openjproxy/jdbc/Driver.java): the JDBC driver entry point that calls both parsers and dispatches to single-node or multinode paths.
+> - `ojp-grpc-commons` — [`ConnectionDetails` proto](../../ojp-grpc-commons/src/main/proto/StatementService.proto): field definitions for `url`, `user`, `password`, `clientUUID`, `properties`, `serverEndpoints`, `clusterHealth`, `isXA`.
+> - `ojp-server` — [`ConnectionHashGenerator.hashConnectionDetails()`](../../ojp-server/src/main/java/org/openjproxy/grpc/server/utils/ConnectionHashGenerator.java): SHA-256 of `url + user + password + datasource_name_from_properties` — the server-side connHash algorithm.
+> - `ojp-jdbc-driver` — [`MultinodeConnectionManager.computeConnectionKey()`](../../ojp-jdbc-driver/src/main/java/org/openjproxy/grpc/client/MultinodeConnectionManager.java): client-side cache key = `url + "|" + user + "|" + password + "|" + datasource_name`.
+> - `ojp-jdbc-driver` — [`MultinodeUrlParser`](../../ojp-jdbc-driver/src/main/java/org/openjproxy/grpc/client/MultinodeUrlParser.java): Java reference for how the JDBC URL is parsed to extract server endpoints, datasource names, and the actual DB URL before building `ConnectionDetails` (Java-specific; not needed in non-Java clients).
 
 ---
 
@@ -148,8 +160,8 @@ All three parts are mandatory:
 
 ### First connection (cache miss)
 
-1. Build a `ConnectionDetails` message:
-   - `url` — the single-endpoint URL extracted during parsing (see §2).
+1. Build a `ConnectionDetails` message (see §2 for field mapping):
+   - `url` — the actual database connection URL.
    - `user`, `password` — credentials.
    - `clientUUID` — the stable process UUID (see §3).
    - `properties` — datasource-specific properties from configuration (see §22), including cache rules (see §23).
