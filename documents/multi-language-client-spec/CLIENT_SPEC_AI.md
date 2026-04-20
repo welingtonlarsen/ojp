@@ -16,7 +16,7 @@
 | **Server** | An OJP server instance exposing `StatementService` and `EchoService` via gRPC. |
 | **Endpoint** | A `host:port` pair identifying one Server. |
 | **Virtual Connection** | A client-side object representing logical access to a database pool, identified by a `SessionInfo` token. Does not correspond 1:1 to a real database connection. |
-| **Real Connection** | A JDBC connection held by the Server's HikariCP pool. The Client never holds one directly. |
+| **Real Connection** | A JDBC connection held by the Server's connection pool. The Client never holds one directly. |
 | **connHash** | A server-computed SHA-256 string keying a specific connection pool. Computed as SHA-256(`url + user + password + datasource_name`). |
 | **SessionInfo** | A proto message propagated on every RPC. Contains `connHash`, `clientUUID`, `sessionUUID`, `transactionInfo`, `sessionStatus`, `isXA`, `targetServer`, `clusterHealth`. |
 | **sessionUUID** | A server-assigned handle for a stateful session (transaction, LOB, cursor). Absent until the Server assigns it. |

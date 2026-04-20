@@ -52,7 +52,7 @@
 
 ## 1. Overview
 
-OJP (Open J Proxy) is a JDBC Type 3 proxy. Its central idea is that real database connections are owned exclusively by the OJP server, which manages them in HikariCP connection pools. Client applications communicate with the server via gRPC rather than opening direct database connections.
+OJP (Open J Proxy) is a JDBC Type 3 proxy. Its central idea is that real database connections are owned exclusively by the OJP server, which manages them in pluggable connection pools (HikariCP by default, replaceable via SPI). Client applications communicate with the server via gRPC rather than opening direct database connections.
 
 ```
 [Application] ──native API──> [OJP Client Library] ──gRPC/HTTP2──> [OJP Server] ──JDBC──> [Database]
@@ -72,7 +72,7 @@ Before diving into implementation details, understand these four foundational id
 
 ### 2.1 Virtual Connections
 
-An OJP "connection" is not a real database connection. The real JDBC connections are held exclusively in the server's HikariCP pool. What the client holds is a `SessionInfo` — a lightweight proto message containing a `connHash` (a pool identifier), the `clientUUID`, and (once assigned) a `sessionUUID`.
+An OJP "connection" is not a real database connection. The real JDBC connections are held exclusively in the server's connection pool. What the client holds is a `SessionInfo` — a lightweight proto message containing a `connHash` (a pool identifier), the `clientUUID`, and (once assigned) a `sessionUUID`.
 
 Opening a connection is cheap. For non-XA connections after the first one, the client can satisfy the `connect()` call entirely from a local cache: it looks up the `connHash` for the given database credentials and builds the `SessionInfo` locally without making any gRPC call. This means connection acquisition for cached credentials costs only a hash-map lookup.
 
@@ -96,7 +96,7 @@ If the bound server becomes unhealthy while a sticky session is open, the client
 
 ### 2.4 Client vs. Server Responsibilities
 
-**The server owns:** real JDBC connections and HikariCP pool management; transaction state; LOB storage; server-side cursor state; query result caching; slow-query slot management; pool resizing in response to cluster health changes.
+**The server owns:** real JDBC connections and connection pool management (pool implementation is pluggable via SPI); transaction state; LOB storage; server-side cursor state; query result caching; slow-query slot management; pool resizing in response to cluster health changes.
 
 **The client owns:** `SessionInfo` propagation (attach current `SessionInfo` to every request; replace with response); `connHash` caching; endpoint health tracking; load balancing; failover; cluster health string building and pushing to surviving servers; session stickiness enforcement (`sessionUUID → targetServer` binding); background health-check task; connection redistribution after server recovery.
 
@@ -521,7 +521,7 @@ When a failed server comes back online, rebalance client-side connections so tha
 
 **Procedure on recovery:**
 
-1. **Reinitialize pools on the recovered server first** (before marking healthy). For every cached `connHash`/`ConnectionDetails` pair, call `connect()` on the recovered server so it creates the HikariCP pool immediately. This closes the NOT_FOUND window between marking the server healthy and the first SQL call reaching it.
+1. **Reinitialize pools on the recovered server first** (before marking healthy). For every cached `connHash`/`ConnectionDetails` pair, call `connect()` on the recovered server so it pre-warms the connection pool immediately. This closes the NOT_FOUND window between marking the server healthy and the first SQL call reaching it.
 2. Mark the server healthy (`endpoint.markHealthy()`).
 3. Push the updated cluster health string to all healthy servers (see §3.5).
 4. If redistribution is enabled (`ojp.redistribution.enabled = true`), begin rebalancing:
