@@ -151,7 +151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: [ 11, 17, 21, 22 ]
+        java-version: [ 11, 17, 21, 22, 24 ]
 
     steps:
       - name: Git checkout
@@ -289,7 +289,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: [ 11, 17, 21, 22 ]
+        java-version: [ 11, 17, 21, 22, 24 ]
 
     services:
       # MySQL database service container
@@ -385,7 +385,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: [ 11, 17, 21, 22 ]
+        java-version: [ 11, 17, 21, 22, 24 ]
 
     services:
       # MariaDB database service container
@@ -482,7 +482,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: [ 11, 17, 21, 22 ]
+        java-version: [ 11, 17, 21, 22, 24 ]
 
     steps:
       - name: Git checkout
@@ -571,7 +571,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: [ 11, 17, 21, 22 ]
+        java-version: [ 11, 17, 21, 22, 24 ]
 
     steps:
       - name: Git checkout
@@ -1578,7 +1578,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: [ 11, 17, 21, 22 ]
+        java-version: [ 11, 17, 21, 22, 24 ]
 
     services:
       # Oracle XE database service container
@@ -1748,7 +1748,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        java-version: [ 11, 17, 21, 22 ]
+        java-version: [ 11, 17, 21, 22, 24 ]
 
     steps:
       - name: Git checkout
