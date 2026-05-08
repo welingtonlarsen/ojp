@@ -297,7 +297,7 @@ java -Duser.timezone=UTC \
      -Dojp.server.port=8080 \
      -Dojp.prometheus.port=9091 \
      -Dojp.telemetry.enabled=false \
-     -Dojp.server.virtualThreads.enabled=false \
+     -Dojp.server.virtualThreads.enabled=true \
      -Dojp.server.threadPoolSize=100 \
      -Dojp.server.circuitBreakerTimeout=120000 \
      -Dojp.server.circuitBreakerThreshold=3 \
@@ -315,7 +315,7 @@ Set configuration using environment variables:
 export OJP_SERVER_PORT=8080
 export OJP_PROMETHEUS_PORT=9091
 export OJP_OPENTELEMETRY_ENABLED=false
-export OJP_SERVER_VIRTUALTHREADS_ENABLED=false
+export OJP_SERVER_VIRTUALTHREADS_ENABLED=true
 export OJP_SERVER_THREADPOOLSIZE=100
 export OJP_SERVER_CIRCUITBREAKERTIMEOUT=120000
 export OJP_SERVER_CIRCUITBREAKERTHRESHOLD=3
@@ -461,7 +461,7 @@ java -Duser.timezone=UTC \
      -Dojp.server.log.file=/var/log/ojp/server.log \
      -Dojp.server.log.maxHistory=90 \
      -Dojp.server.log.totalSizeCap=10GB \
-     -Dojp.server.virtualThreads.enabled=false \
+     -Dojp.server.virtualThreads.enabled=true \
      -Dojp.server.threadPoolSize=300 \
      -Dojp.server.circuitBreakerTimeout=60000 \
      -Dojp.server.slowQuerySegregation.enabled=true \
@@ -477,7 +477,7 @@ java -Duser.timezone=UTC \
 ```bash
 java -Duser.timezone=UTC \
      -Dojp.server.port=1059 \
-     -Dojp.server.virtualThreads.enabled=false \
+     -Dojp.server.virtualThreads.enabled=true \
      -Dojp.server.threadPoolSize=500 \
      -Dojp.server.maxRequestSize=16777216 \
      -Dojp.server.connectionIdleTimeout=60000 \
@@ -498,7 +498,7 @@ metadata:
 data:
   OJP_SERVER_PORT: "1059"
   OJP_PROMETHEUS_PORT: "9159"
-  OJP_SERVER_VIRTUALTHREADS_ENABLED: "false"
+  OJP_SERVER_VIRTUALTHREADS_ENABLED: "true"
   OJP_SERVER_THREADPOOLSIZE: "200"
   OJP_SERVER_LOGLEVEL: "INFO"
   OJP_SERVER_LOG_FILE: "/var/log/ojp/server.log"

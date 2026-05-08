@@ -239,7 +239,7 @@ java -Duser.timezone=UTC \
      -Dojp.server.port=8080 \
      -Dojp.prometheus.port=9091 \
      -Dojp.libs.path=./ojp-libs \
-     -Dojp.server.virtualThreads.enabled=false \
+     -Dojp.server.virtualThreads.enabled=true \
      -Dojp.server.threadPoolSize=100 \
      -Dojp.max.request.size=8388608 \
      -jar ojp-server-0.4.10-beta-shaded.jar
@@ -344,7 +344,7 @@ java -Duser.timezone=UTC \
      -Xmx4g \
      -XX:+UseG1GC \
      -XX:MaxGCPauseMillis=100 \
-     -Dojp.server.virtualThreads.enabled=false \
+     -Dojp.server.virtualThreads.enabled=true \
      -Dojp.server.threadPoolSize=500 \
      -jar ojp-server-0.4.10-beta-shaded.jar
 ```

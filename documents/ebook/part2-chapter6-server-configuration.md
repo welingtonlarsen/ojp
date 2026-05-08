@@ -47,7 +47,7 @@ Here's how you configure these core settings:
 java -Duser.timezone=UTC \
      -Dojp.server.port=9059 \
      -Dojp.prometheus.port=9091 \
-     -Dojp.server.virtualThreads.enabled=false \
+     -Dojp.server.virtualThreads.enabled=true \
      -Dojp.server.threadPoolSize=100 \
      -Dojp.server.maxRequestSize=8388608 \
      -Dojp.server.connectionIdleTimeout=60000 \
@@ -59,7 +59,7 @@ Or using environment variables for container deployments:
 ```bash
 export OJP_SERVER_PORT=9059
 export OJP_PROMETHEUS_PORT=9091
-export OJP_SERVER_VIRTUALTHREADS_ENABLED=false
+export OJP_SERVER_VIRTUALTHREADS_ENABLED=true
 export OJP_SERVER_THREADPOOLSIZE=100
 export OJP_SERVER_MAXREQUESTSIZE=8388608
 export OJP_SERVER_CONNECTIONIDLETIMEOUT=60000
@@ -363,7 +363,7 @@ For development environments, prioritize visibility and fast feedback. Use INFO 
 export OJP_SERVER_PORT=1059
 export OJP_SERVER_LOGLEVEL=DEBUG
 export OJP_PROMETHEUS_PORT=9159
-export OJP_SERVER_VIRTUALTHREADS_ENABLED=false
+export OJP_SERVER_VIRTUALTHREADS_ENABLED=true
 export OJP_SERVER_THREADPOOLSIZE=50
 export OJP_SERVER_CIRCUITBREAKERTHRESHOLD=5
 export OJP_SERVER_ALLOWEDIPS="0.0.0.0/0"
