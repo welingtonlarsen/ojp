@@ -74,8 +74,11 @@ public class Driver implements java.sql.Driver {
             }
         }
 
-        // Load ojp.properties file and extract datasource-specific configuration
+        // Load ojp.properties file and extract datasource-specific configuration.
+        // Then merge any ojp.connection.pool.* / ojp.xa.* keys from the caller-supplied info
+        // on top (info properties take the highest priority).
         Properties ojpProperties = DatasourcePropertiesLoader.loadOjpPropertiesForDataSource(dataSourceName);
+        ojpProperties = DatasourcePropertiesLoader.applyInfoProperties(ojpProperties, info, dataSourceName);
 
         ConnectionDetails.Builder connBuilder = ConnectionDetails.newBuilder()
                 .setUrl(connectionUrl)
