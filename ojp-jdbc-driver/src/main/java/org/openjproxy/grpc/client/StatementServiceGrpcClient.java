@@ -13,6 +13,8 @@ import com.openjproxy.grpc.SessionInfo;
 import com.openjproxy.grpc.SessionTerminationStatus;
 import com.openjproxy.grpc.StatementRequest;
 import com.openjproxy.grpc.StatementServiceGrpc;
+import io.grpc.Metadata;
+import io.grpc.Status;
 import io.grpc.ManagedChannel;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.ServerCallStreamObserver;
@@ -414,9 +416,13 @@ public class StatementServiceGrpcClient implements StatementService {
     }
 
     private Exception normalizeTerminateSessionException(Exception exception) {
-        if (exception instanceof StatusRuntimeException statusRuntimeException) {
+        if (exception instanceof StatusRuntimeException) {
+            Metadata metadata = Status.trailersFromThrowable((StatusRuntimeException) exception);
+            if (metadata == null) {
+                return exception;
+            }
             try {
-                handle(statusRuntimeException);
+                handle((StatusRuntimeException) exception);
             } catch (SQLException sqlException) {
                 return sqlException;
             }
@@ -433,8 +439,8 @@ public class StatementServiceGrpcClient implements StatementService {
     }
 
     private SQLException toTerminateSessionSQLException(Exception exception) {
-        if (exception instanceof SQLException sqlException) {
-            return sqlException;
+        if (exception instanceof SQLException) {
+            return (SQLException) exception;
         }
         return new SQLException("Error while terminating session: " + exception.getMessage(), exception);
     }

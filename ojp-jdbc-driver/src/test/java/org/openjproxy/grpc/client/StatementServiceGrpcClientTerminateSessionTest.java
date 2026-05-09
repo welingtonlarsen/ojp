@@ -88,8 +88,8 @@ class StatementServiceGrpcClientTerminateSessionTest {
         SessionTerminationStatus terminateSessionRpc(SessionInfo session) throws Exception {
             terminateAttempts++;
             Object outcome = outcomes.removeFirst();
-            if (outcome instanceof Exception exception) {
-                throw exception;
+            if (outcome instanceof Exception) {
+                throw (Exception) outcome;
             }
             return (SessionTerminationStatus) outcome;
         }
