@@ -309,6 +309,39 @@ These examples demonstrate recommended settings for each environment and can be 
 - `ojp.connection.pool.maximumPoolSize=20` (default datasource)
 - `myApp.ojp.connection.pool.maximumPoolSize=50` (myApp datasource)
 
+### Programmatic Configuration via `DriverManager.getConnection()`
+
+In addition to `ojp.properties` files and system properties, you can supply pool configuration
+**directly in the `Properties` object** passed to `DriverManager.getConnection(url, info)`.
+Any `ojp.connection.pool.*` or `ojp.xa.*` key present in `info` is merged on top of the
+file-based configuration and takes the **highest precedence**.
+
+```java
+Properties info = new Properties();
+info.setProperty("user", "alice");
+info.setProperty("password", "secret");
+
+// These override any matching value in ojp.properties / system properties / env vars
+info.setProperty("ojp.connection.pool.maximumPoolSize", String.valueOf(allocatedMaxConnections));
+info.setProperty("ojp.connection.pool.minimumIdle", "3");
+
+Connection conn = DriverManager.getConnection(
+    "jdbc:ojp[ojp-server:1059]_postgresql://db:5432/mydb", info);
+```
+
+**Property precedence** (highest to lowest):
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | `info` argument to `getConnection()` | `info.setProperty("ojp.connection.pool.maximumPoolSize", "50")` |
+| 2 | Environment variables | `OJP_CONNECTION_POOL_MAXIMUMPOOLSIZE=50` |
+| 3 | System properties | `-Dojp.connection.pool.maximumPoolSize=50` |
+| 4 | Properties file (`ojp.properties`) | `ojp.connection.pool.maximumPoolSize=50` |
+
+Only `ojp.connection.pool.*` and `ojp.xa.*` keys are read from `info`.
+JDBC-standard keys such as `user` and `password` are extracted separately and are never
+treated as pool configuration.
+
 ### Transaction Isolation Configuration
 
 OJP automatically resets transaction isolation levels when connections are returned to the pool, preventing state pollution between different client sessions.
