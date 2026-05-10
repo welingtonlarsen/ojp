@@ -71,7 +71,7 @@ These settings are **server-global defaults**. They are not configured per datas
 - `statementCache.prepareThreshold` (count): executions before server-side prepare is used (driver-dependent).
 
 **Application scope:** The canonical keys are global in OJP server config, then applied when each pool/datasource is created.
-So limits like `maxSize=250` are interpreted by the target driver/pool as cache-entry counts (for example, typically per physical JDBC connection in drivers like MySQL), not memory sizes.
+So limits like `maxSize=250` are interpreted by the target driver/pool as cache-entry counts (for example, typically per physical JDBC connection in drivers like MySQL), not a memory size.
 
 ---
 

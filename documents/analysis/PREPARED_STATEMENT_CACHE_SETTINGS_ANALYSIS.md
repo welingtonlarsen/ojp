@@ -137,7 +137,7 @@ This section clarifies what each setting means and where it applies.
 
 - Canonical keys are configured once at OJP server level (global scope).
 - At runtime, they are translated and applied when each datasource/pool is instantiated.
-- Practical cache behavior is determined by the target JDBC driver/pool implementation. For common drivers, cache size values like `250` are interpreted as **number of statement entries, typically per physical JDBC connection**, not as memory size.
+- Practical cache behavior is determined by the target JDBC driver/pool implementation. For common drivers, cache size values like `250` are interpreted as **number of statement entries, typically per physical JDBC connection in the pool** (for example, in MySQL Connector/J this aligns with per-connection prepared statement cache behavior), not as memory size.
 
 ---
 
