@@ -168,10 +168,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         assertEquals(10, allSlowManager.getSlowSlots());
         assertEquals(0, allSlowManager.getFastSlots());
 
-        // Test 0% slow slots (minimum 1 is enforced)
+        // Test 0% slow slots (all slots become fast for admission-control-only mode)
         SlotManager noSlowManager = new SlotManager(10, 0, 100);
-        assertEquals(1, noSlowManager.getSlowSlots());
-        assertEquals(9, noSlowManager.getFastSlots());
+        assertEquals(0, noSlowManager.getSlowSlots());
+        assertEquals(10, noSlowManager.getFastSlots());
 
         // Test single slot
         SlotManager singleSlotManager = new SlotManager(1, 50, 100);

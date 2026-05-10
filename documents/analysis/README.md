@@ -73,6 +73,7 @@ This directory contains technical analysis documents for various OJP features an
 ### Pool Management
 
 - [POOL_DISABLE_FINAL_SUMMARY.md](./POOL_DISABLE_FINAL_SUMMARY.md) - Analysis of pool disable functionality
+- [ALWAYS_ON_ADMISSION_CONTROL_SEMAPHORE_ANALYSIS.md](./ALWAYS_ON_ADMISSION_CONTROL_SEMAPHORE_ANALYSIS.md) - Always-on semaphore admission control rationale and implementation notes
 - [PREPARED_STATEMENT_CACHE_SETTINGS_SUMMARY.md](./PREPARED_STATEMENT_CACHE_SETTINGS_SUMMARY.md) - Prepared statement cache settings design (summary)
 - [PREPARED_STATEMENT_CACHE_SETTINGS_ANALYSIS.md](./PREPARED_STATEMENT_CACHE_SETTINGS_ANALYSIS.md) - Prepared statement cache settings design (detailed)
 

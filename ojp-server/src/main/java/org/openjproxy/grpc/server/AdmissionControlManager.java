@@ -4,27 +4,34 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Manages slow query segregation by combining performance monitoring with slot management.
+ * Manages per-datasource admission control and optional slow-query segregation.
  *
- * This class coordinates between the QueryPerformanceMonitor (which tracks execution times)
- * and the SlotManager (which enforces execution limits) to implement the slow query segregation feature.
+ * <p>This class coordinates between {@link QueryPerformanceMonitor} (classification signal)
+ * and {@link SlotManager} (concurrency gate). It supports two execution modes:
+ * </p>
+ * <ul>
+ *     <li><b>Admission-control-only</b>: fixed-capacity gate, no slow/fast split.</li>
+ *     <li><b>Segregated</b>: slow/fast slot classification with slot borrowing.</li>
+ * </ul>
  *
- * <p>SQL execution time metrics are recorded by the caller ({@code StatementServiceImpl.executeWithResilience}).
- * This class handles only performance classification and concurrency slot management.</p>
+ * <p>SQL execution time metrics are recorded by the caller
+ * ({@code StatementServiceImpl.executeWithResilience}). This class handles classification
+ * and slot admission only.</p>
  */
-public class SlowQuerySegregationManager {
+public class AdmissionControlManager {
 
     // Workaround for Lombok compilation issue
-    private static final Logger logger = LoggerFactory.getLogger(SlowQuerySegregationManager.class);
+    private static final Logger logger = LoggerFactory.getLogger(AdmissionControlManager.class);
 
     private final QueryPerformanceMonitor performanceMonitor;
     private final SlotManager slotManager;
     private final boolean enabled;
+    private final boolean admissionControlOnly;
     private final long slowSlotTimeoutMs;
     private final long fastSlotTimeoutMs;
 
     /**
-     * Creates a new SlowQuerySegregationManager.
+     * Creates a new AdmissionControlManager.
      *
      * @param totalSlots The maximum total number of concurrent operations (from HikariCP max pool size)
      * @param slowSlotPercentage The percentage of slots allocated to slow operations (0-100)
@@ -32,27 +39,29 @@ public class SlowQuerySegregationManager {
      * @param slowSlotTimeoutMs The timeout in milliseconds for acquiring slow operation slots
      * @param fastSlotTimeoutMs The timeout in milliseconds for acquiring fast operation slots
      * @param updateGlobalAvgIntervalSeconds The interval in seconds for updating global average (0 = update every query)
-     * @param enabled Whether the slow query segregation feature is enabled
+     * @param enabled Whether admission control is enabled
      */
-    public SlowQuerySegregationManager(int totalSlots, int slowSlotPercentage, long idleTimeoutMs,
+    public AdmissionControlManager(int totalSlots, int slowSlotPercentage, long idleTimeoutMs,
                                      long slowSlotTimeoutMs, long fastSlotTimeoutMs, long updateGlobalAvgIntervalSeconds, boolean enabled) {
         this.enabled = enabled;
+        this.admissionControlOnly = enabled && slowSlotPercentage == 0;
         this.slowSlotTimeoutMs = slowSlotTimeoutMs;
         this.fastSlotTimeoutMs = fastSlotTimeoutMs;
         this.performanceMonitor = new QueryPerformanceMonitor(updateGlobalAvgIntervalSeconds);
 
         if (enabled) {
             this.slotManager = new SlotManager(totalSlots, slowSlotPercentage, idleTimeoutMs);
-            logger.info("SlowQuerySegregationManager initialized: enabled={}, totalSlots={}, slowSlotPercentage={}%, idleTimeout={}ms, slowSlotTimeout={}ms, fastSlotTimeout={}ms, updateGlobalAvgInterval={}s",
-                    enabled, totalSlots, slowSlotPercentage, idleTimeoutMs, slowSlotTimeoutMs, fastSlotTimeoutMs, updateGlobalAvgIntervalSeconds);
+            logger.info("AdmissionControlManager initialized: enabled={}, admissionControlOnly={}, totalSlots={}, slowSlotPercentage={}%, idleTimeout={}ms, slowSlotTimeout={}ms, fastSlotTimeout={}ms, updateGlobalAvgInterval={}s",
+                    enabled, admissionControlOnly, totalSlots, slowSlotPercentage, idleTimeoutMs, slowSlotTimeoutMs, fastSlotTimeoutMs, updateGlobalAvgIntervalSeconds);
         } else {
             this.slotManager = null;
-            logger.info("SlowQuerySegregationManager initialized: enabled={}, updateGlobalAvgInterval={}s", enabled, updateGlobalAvgIntervalSeconds);
+            logger.info("AdmissionControlManager initialized: enabled={}, admissionControlOnly={}, updateGlobalAvgInterval={}s",
+                    enabled, admissionControlOnly, updateGlobalAvgIntervalSeconds);
         }
     }
 
     /**
-     * Creates a new SlowQuerySegregationManager with default global average update interval.
+     * Creates a new AdmissionControlManager with default global average update interval.
      * This constructor maintains backward compatibility.
      *
      * @param totalSlots The maximum total number of concurrent operations (from HikariCP max pool size)
@@ -60,15 +69,15 @@ public class SlowQuerySegregationManager {
      * @param idleTimeoutMs The time in milliseconds before a slot is considered idle and eligible for borrowing
      * @param slowSlotTimeoutMs The timeout in milliseconds for acquiring slow operation slots
      * @param fastSlotTimeoutMs The timeout in milliseconds for acquiring fast operation slots
-     * @param enabled Whether the slow query segregation feature is enabled
+     * @param enabled Whether admission control is enabled
      */
-    public SlowQuerySegregationManager(int totalSlots, int slowSlotPercentage, long idleTimeoutMs,
+    public AdmissionControlManager(int totalSlots, int slowSlotPercentage, long idleTimeoutMs,
                                      long slowSlotTimeoutMs, long fastSlotTimeoutMs, boolean enabled) {
         this(totalSlots, slowSlotPercentage, idleTimeoutMs, slowSlotTimeoutMs, fastSlotTimeoutMs, 0L, enabled);
     }
 
     /**
-     * Executes an operation with slow query segregation.
+     * Executes an operation with admission control.
      * This method handles slot acquisition, performance monitoring, and slot release.
      * The {@code operationHash} is used for performance monitoring (slot classification);
      * the actual SQL text is passed separately for metric labelling.
@@ -82,8 +91,25 @@ public class SlowQuerySegregationManager {
      */
     public <T> T executeWithSegregation(String operationHash, String sql, SegregatedOperation<T> operation) throws Exception {
         if (!enabled) {
-            // If segregation is disabled, just execute and monitor performance
+            // If admission control is disabled, just execute and monitor performance
             return executeAndMonitor(operationHash, sql, operation);
+        }
+
+        if (admissionControlOnly) {
+            boolean slotAcquired = false;
+            try {
+                slotAcquired = slotManager.acquireFastSlot(fastSlotTimeoutMs);
+                if (!slotAcquired) {
+                    throw new RuntimeException("Timeout waiting for admission control slot for operation: " + operationHash);
+                }
+                logger.debug("Acquired admission control slot for operation: {}", operationHash);
+                return executeAndMonitor(operationHash, sql, operation);
+            } finally {
+                if (slotAcquired) {
+                    slotManager.releaseFastSlot();
+                    logger.debug("Released admission control slot for operation: {}", operationHash);
+                }
+            }
         }
 
         // Determine if this is a slow or fast operation
@@ -125,7 +151,7 @@ public class SlowQuerySegregationManager {
     }
 
     /**
-     * Executes an operation with slow query segregation.
+     * Executes an operation with admission control.
      * This method handles slot acquisition, performance monitoring, and slot release.
      *
      * @param operationHash The hash of the SQL operation
@@ -166,11 +192,12 @@ public class SlowQuerySegregationManager {
      */
     public String getStatus() {
         if (!enabled) {
-            return "SlowQuerySegregationManager[enabled=false]";
+            return "AdmissionControlManager[enabled=false]";
         }
 
         return String.format(
-            "SlowQuerySegregationManager[enabled=true, trackedOps=%d, totalExecs=%d, overallAvg=%.2fms, %s]",
+            "AdmissionControlManager[enabled=true, admissionControlOnly=%s, trackedOps=%d, totalExecs=%d, overallAvg=%.2fms, %s]",
+            admissionControlOnly,
             performanceMonitor.getTrackedOperationCount(),
             performanceMonitor.getTotalExecutionCount(),
             performanceMonitor.getOverallAverageExecutionTime(),
@@ -200,10 +227,17 @@ public class SlowQuerySegregationManager {
     }
 
     /**
-     * Checks if the slow query segregation feature is enabled.
+     * Checks if admission control is enabled.
      */
     public boolean isEnabled() {
         return enabled;
+    }
+
+    /**
+     * Checks if manager is running in admission-control-only mode (no slow/fast segregation).
+     */
+    public boolean isAdmissionControlOnly() {
+        return admissionControlOnly;
     }
 
     /**
