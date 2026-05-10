@@ -360,13 +360,13 @@ class H2OpenLoopLatencyIntegrationTest {
         void run(int operationIndex) throws SQLException;
     }
 
-    private static class LoopRunResult {
+    private static final class LoopRunResult {
         private final Map<SqlType, List<Long>> sqlLatencies;
         private final Map<StepType, List<Long>> stepLatencies;
 
         LoopRunResult(Map<SqlType, List<Long>> sqlLatencies, Map<StepType, List<Long>> stepLatencies) {
-            this.sqlLatencies = sqlLatencies;
-            this.stepLatencies = stepLatencies;
+            this.sqlLatencies = copyLatencyMap(sqlLatencies);
+            this.stepLatencies = copyLatencyMap(stepLatencies);
         }
 
         Map<SqlType, List<Long>> getSqlLatencies() {
@@ -375,6 +375,15 @@ class H2OpenLoopLatencyIntegrationTest {
 
         Map<StepType, List<Long>> getStepLatencies() {
             return Collections.unmodifiableMap(stepLatencies);
+        }
+
+        private static <E extends Enum<E>> Map<E, List<Long>> copyLatencyMap(Map<E, List<Long>> source) {
+            Class<E> enumClass = source.keySet().iterator().next().getDeclaringClass();
+            Map<E, List<Long>> copy = new EnumMap<>(enumClass);
+            for (Map.Entry<E, List<Long>> entry : source.entrySet()) {
+                copy.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+            }
+            return copy;
         }
     }
 
@@ -425,23 +434,19 @@ class H2OpenLoopLatencyIntegrationTest {
 
     private LoopMode parseLoopMode(String rawMode) {
         String normalized = rawMode.trim().toUpperCase();
-        if ("OPEN".equals(normalized)) {
-            return LoopMode.OPEN_LOOP;
+        switch (normalized) {
+            case "OPEN":
+            case "OPEN_LOOP":
+                return LoopMode.OPEN_LOOP;
+            case "CLOSED":
+            case "CLOSED_LOOP":
+                return LoopMode.CLOSED_LOOP;
+            case "BOTH":
+                return LoopMode.BOTH;
+            default:
+                throw new IllegalArgumentException("Invalid " + LOOP_MODE_PROPERTY + " value: " + rawMode
+                        + ". Allowed values: OPEN, CLOSED, OPEN_LOOP, CLOSED_LOOP, BOTH");
         }
-        if ("CLOSED".equals(normalized)) {
-            return LoopMode.CLOSED_LOOP;
-        }
-        if ("BOTH".equals(normalized)) {
-            return LoopMode.BOTH;
-        }
-        if (LoopMode.OPEN_LOOP.name().equals(normalized)) {
-            return LoopMode.OPEN_LOOP;
-        }
-        if (LoopMode.CLOSED_LOOP.name().equals(normalized)) {
-            return LoopMode.CLOSED_LOOP;
-        }
-        throw new IllegalArgumentException("Invalid " + LOOP_MODE_PROPERTY + " value: " + rawMode
-                + ". Allowed values: OPEN, CLOSED, OPEN_LOOP, CLOSED_LOOP, BOTH");
     }
 
     private void assertExpectedCounts(Map<SqlType, List<Long>> sqlLatencies,
