@@ -46,16 +46,16 @@ public class ServerConfiguration {
     private static final String SQL_ENHANCER_CACHE_ENABLED_KEY = "ojp.sql.enhancer.cacheEnabled";
     private static final String SQL_ENHANCER_CACHE_SIZE_KEY = "ojp.sql.enhancer.cacheSize";
     private static final String SQL_ENHANCER_FAIL_ON_VALIDATION_ERROR_KEY = "ojp.sql.enhancer.failOnValidationError";
-    private static final String STATEMENT_CACHE_ENABLED_KEY = "ojp.connection.pool.statementCache.enabled";
-    private static final String STATEMENT_CACHE_MAX_SIZE_KEY = "ojp.connection.pool.statementCache.maxSize";
-    private static final String STATEMENT_CACHE_SQL_LIMIT_KEY = "ojp.connection.pool.statementCache.sqlLimit";
-    private static final String STATEMENT_CACHE_SERVER_PREPARE_KEY = "ojp.connection.pool.statementCache.serverPrepare";
-    private static final String STATEMENT_CACHE_PREPARE_THRESHOLD_KEY = "ojp.connection.pool.statementCache.prepareThreshold";
-    private static final String XA_STATEMENT_CACHE_ENABLED_KEY = "ojp.xa.connection.pool.statementCache.enabled";
-    private static final String XA_STATEMENT_CACHE_MAX_SIZE_KEY = "ojp.xa.connection.pool.statementCache.maxSize";
-    private static final String XA_STATEMENT_CACHE_SQL_LIMIT_KEY = "ojp.xa.connection.pool.statementCache.sqlLimit";
-    private static final String XA_STATEMENT_CACHE_SERVER_PREPARE_KEY = "ojp.xa.connection.pool.statementCache.serverPrepare";
-    private static final String XA_STATEMENT_CACHE_PREPARE_THRESHOLD_KEY = "ojp.xa.connection.pool.statementCache.prepareThreshold";
+    private static final String STATEMENT_CACHE_ENABLED_KEY = CommonConstants.STATEMENT_CACHE_ENABLED_PROPERTY;
+    private static final String STATEMENT_CACHE_MAX_SIZE_KEY = CommonConstants.STATEMENT_CACHE_MAX_SIZE_PROPERTY;
+    private static final String STATEMENT_CACHE_SQL_LIMIT_KEY = CommonConstants.STATEMENT_CACHE_SQL_LIMIT_PROPERTY;
+    private static final String STATEMENT_CACHE_SERVER_PREPARE_KEY = CommonConstants.STATEMENT_CACHE_SERVER_PREPARE_PROPERTY;
+    private static final String STATEMENT_CACHE_PREPARE_THRESHOLD_KEY = CommonConstants.STATEMENT_CACHE_PREPARE_THRESHOLD_PROPERTY;
+    private static final String XA_STATEMENT_CACHE_ENABLED_KEY = CommonConstants.XA_STATEMENT_CACHE_ENABLED_PROPERTY;
+    private static final String XA_STATEMENT_CACHE_MAX_SIZE_KEY = CommonConstants.XA_STATEMENT_CACHE_MAX_SIZE_PROPERTY;
+    private static final String XA_STATEMENT_CACHE_SQL_LIMIT_KEY = CommonConstants.XA_STATEMENT_CACHE_SQL_LIMIT_PROPERTY;
+    private static final String XA_STATEMENT_CACHE_SERVER_PREPARE_KEY = CommonConstants.XA_STATEMENT_CACHE_SERVER_PREPARE_PROPERTY;
+    private static final String XA_STATEMENT_CACHE_PREPARE_THRESHOLD_KEY = CommonConstants.XA_STATEMENT_CACHE_PREPARE_THRESHOLD_PROPERTY;
 
     // Schema loader configuration keys
     private static final String SCHEMA_REFRESH_ENABLED_KEY = "ojp.sql.enhancer.schema.refresh.enabled";
