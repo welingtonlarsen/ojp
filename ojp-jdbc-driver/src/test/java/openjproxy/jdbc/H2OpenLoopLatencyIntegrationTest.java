@@ -291,7 +291,7 @@ class H2OpenLoopLatencyIntegrationTest {
         }
 
         StringBuilder report = new StringBuilder();
-        report.append("\n=== OPEN LOOP VS CLOSED LOOP COMPARISON (P50 MS) ===\n");
+        report.append(String.format("%n=== OPEN LOOP VS CLOSED LOOP COMPARISON (P50 MS) ===%n"));
         appendComparisonLine(report, "SELECT",
                 calculateMedianMs(openLoopResult.getSqlLatencies().get(SqlType.SELECT)),
                 calculateMedianMs(closedLoopResult.getSqlLatencies().get(SqlType.SELECT)));
@@ -376,11 +376,11 @@ class H2OpenLoopLatencyIntegrationTest {
         }
 
         Map<SqlType, List<Long>> getSqlLatencies() {
-            return sqlLatencies;
+            return Collections.unmodifiableMap(sqlLatencies);
         }
 
         Map<StepType, List<Long>> getStepLatencies() {
-            return stepLatencies;
+            return Collections.unmodifiableMap(stepLatencies);
         }
     }
 
@@ -415,7 +415,7 @@ class H2OpenLoopLatencyIntegrationTest {
         }
     }
 
-    private List<LoopMode> resolveExecutionModes() throws SQLException {
+    private List<LoopMode> resolveExecutionModes() {
         String rawMode = System.getProperty(LOOP_MODE_PROPERTY, LoopMode.BOTH.name());
         LoopMode loopMode = parseLoopMode(rawMode);
         if (loopMode == LoopMode.BOTH) {
@@ -429,7 +429,7 @@ class H2OpenLoopLatencyIntegrationTest {
         return singleMode;
     }
 
-    private LoopMode parseLoopMode(String rawMode) throws SQLException {
+    private LoopMode parseLoopMode(String rawMode) {
         String normalized = rawMode.trim().toUpperCase();
         if ("OPEN".equals(normalized)) {
             return LoopMode.OPEN_LOOP;
@@ -446,7 +446,7 @@ class H2OpenLoopLatencyIntegrationTest {
         if (LoopMode.CLOSED_LOOP.name().equals(normalized)) {
             return LoopMode.CLOSED_LOOP;
         }
-        throw new SQLException("Invalid " + LOOP_MODE_PROPERTY + " value: " + rawMode
+        throw new IllegalArgumentException("Invalid " + LOOP_MODE_PROPERTY + " value: " + rawMode
                 + ". Allowed values: OPEN, CLOSED, OPEN_LOOP, CLOSED_LOOP, BOTH");
     }
 
