@@ -125,12 +125,16 @@ class H2OpenLoopLatencyIntegrationTest {
             runSelectQueries(loopMode, sqlLatencies, stepLatencies, activeIds);
             runWriteQueries(loopMode, sqlLatencies, stepLatencies, activeIds);
             long fullTestDurationNanos = System.nanoTime() - fullTestStartNanos;
+            long plannedPacingDurationNanos = estimatePlannedPacingDurationNanos(loopMode);
+            long effectiveFullTestDurationNanos = Math.max(0L, fullTestDurationNanos - plannedPacingDurationNanos);
             int totalOperations = SELECT_QUERY_COUNT + WRITE_OPERATION_COUNT;
 
             assertExpectedCounts(sqlLatencies, stepLatencies);
-            logLatencyReport(loopMode, sqlLatencies, stepLatencies, fullTestDurationNanos, totalOperations);
+            logLatencyReport(loopMode, sqlLatencies, stepLatencies, fullTestDurationNanos,
+                    plannedPacingDurationNanos, effectiveFullTestDurationNanos, totalOperations);
             loopResults.put(loopMode, new LoopRunResult(sqlLatencies, stepLatencies,
-                    fullTestDurationNanos, totalOperations));
+                    fullTestDurationNanos, plannedPacingDurationNanos, effectiveFullTestDurationNanos,
+                    totalOperations));
         }
 
         logModeComparison(loopResults);
@@ -254,14 +258,23 @@ class H2OpenLoopLatencyIntegrationTest {
                                   Map<SqlType, List<Long>> sqlLatencies,
                                   Map<StepType, List<Long>> stepLatencies,
                                   long fullTestDurationNanos,
+                                  long plannedPacingDurationNanos,
+                                  long effectiveFullTestDurationNanos,
                                   int totalOperations) {
         StringBuilder report = new StringBuilder();
         double fullTestDurationMs = fullTestDurationNanos / 1_000_000.0;
-        double fullTestAvgPerOperationMs = fullTestDurationMs / totalOperations;
+        double plannedPacingDurationMs = plannedPacingDurationNanos / 1_000_000.0;
+        double effectiveFullTestDurationMs = effectiveFullTestDurationNanos / 1_000_000.0;
+        double effectiveFullTestAvgPerOperationMs =
+                calculateAverageMsPerOperation(effectiveFullTestDurationNanos, totalOperations);
         report.append(String.format("%n=== H2 LATENCY REPORT (%s) ===%n", loopMode));
-        report.append(String.format("Full test total time: %.3f ms%n", fullTestDurationMs));
-        report.append(String.format("Full test average time per operation (total/ops): %.3f ms%n",
-                fullTestAvgPerOperationMs));
+        report.append(String.format("Full test wall-clock total time: %.3f ms%n", fullTestDurationMs));
+        report.append(String.format("Planned pacing time (open-loop dispatch spacing): %.3f ms%n",
+                plannedPacingDurationMs));
+        report.append(String.format("Full test effective total time (wall-clock - planned pacing): %.3f ms%n",
+                effectiveFullTestDurationMs));
+        report.append(String.format("Full test effective average time per operation (effective total/ops): %.3f ms%n",
+                effectiveFullTestAvgPerOperationMs));
         report.append(String.format("Total operations: %d%n", totalOperations));
         report.append(String.format("SELECT operations: %d%n", sqlLatencies.get(SqlType.SELECT).size()));
         report.append(String.format("INSERT operations: %d%n", sqlLatencies.get(SqlType.INSERT).size()));
@@ -330,14 +343,19 @@ class H2OpenLoopLatencyIntegrationTest {
                 calculateMedianMs(closedLoopResult.getStepLatencies().get(StepType.CLOSE)));
         report.append('\n');
         report.append("=== FULL TEST DURATION COMPARISON ===\n");
-        appendDurationComparisonLine(report, "full-test-total-time",
+        appendDurationComparisonLine(report, "full-test-wall-clock-total-time",
                 openLoopResult.getFullTestDurationNanos(), closedLoopResult.getFullTestDurationNanos());
-        appendDurationPerOperationComparisonLine(report, "full-test-average-per-operation",
-                openLoopResult.getFullTestDurationNanos(), openLoopResult.getTotalOperations(),
-                closedLoopResult.getFullTestDurationNanos(), closedLoopResult.getTotalOperations());
+        appendDurationComparisonLine(report, "full-test-effective-total-time (wall-clock - planned pacing)",
+                openLoopResult.getEffectiveFullTestDurationNanos(),
+                closedLoopResult.getEffectiveFullTestDurationNanos());
+        appendDurationPerOperationComparisonLine(report, "full-test-effective-average-per-operation",
+                openLoopResult.getEffectiveFullTestDurationNanos(), openLoopResult.getTotalOperations(),
+                closedLoopResult.getEffectiveFullTestDurationNanos(), closedLoopResult.getTotalOperations());
         report.append("Note: closed-loop medians can be misleading because each request waits for the prior\n");
         report.append("request to finish before sending the next one. Total time / total operations adds an\n");
         report.append("end-to-end per-operation view that includes this waiting behavior.\n");
+        report.append("Open-loop wall-clock totals include intentional dispatch spacing, so effective totals\n");
+        report.append("subtract planned pacing time before cross-mode comparison.\n");
         log.info(report.toString());
     }
 
@@ -417,15 +435,21 @@ class H2OpenLoopLatencyIntegrationTest {
         private final Map<SqlType, List<Long>> sqlLatencies;
         private final Map<StepType, List<Long>> stepLatencies;
         private final long fullTestDurationNanos;
+        private final long plannedPacingDurationNanos;
+        private final long effectiveFullTestDurationNanos;
         private final int totalOperations;
 
         LoopRunResult(Map<SqlType, List<Long>> sqlLatencies,
                       Map<StepType, List<Long>> stepLatencies,
                       long fullTestDurationNanos,
+                      long plannedPacingDurationNanos,
+                      long effectiveFullTestDurationNanos,
                       int totalOperations) {
             this.sqlLatencies = copyLatencyMap(sqlLatencies);
             this.stepLatencies = copyLatencyMap(stepLatencies);
             this.fullTestDurationNanos = fullTestDurationNanos;
+            this.plannedPacingDurationNanos = plannedPacingDurationNanos;
+            this.effectiveFullTestDurationNanos = effectiveFullTestDurationNanos;
             this.totalOperations = totalOperations;
         }
 
@@ -439,6 +463,14 @@ class H2OpenLoopLatencyIntegrationTest {
 
         long getFullTestDurationNanos() {
             return fullTestDurationNanos;
+        }
+
+        long getPlannedPacingDurationNanos() {
+            return plannedPacingDurationNanos;
+        }
+
+        long getEffectiveFullTestDurationNanos() {
+            return effectiveFullTestDurationNanos;
         }
 
         int getTotalOperations() {
@@ -541,6 +573,22 @@ class H2OpenLoopLatencyIntegrationTest {
             return;
         }
         executeClosedLoopWorkload(operationCount, operation);
+    }
+
+    private long estimatePlannedPacingDurationNanos(LoopMode loopMode) {
+        if (loopMode != LoopMode.OPEN_LOOP) {
+            return 0L;
+        }
+        return estimateOpenLoopDispatchWindowNanos(SELECT_QUERY_COUNT, SELECT_OPEN_LOOP_RATE_PER_SECOND)
+                + estimateOpenLoopDispatchWindowNanos(WRITE_OPERATION_COUNT, WRITE_OPEN_LOOP_RATE_PER_SECOND);
+    }
+
+    private long estimateOpenLoopDispatchWindowNanos(int operationCount, int operationsPerSecond) {
+        if (operationCount <= 1 || operationsPerSecond <= 0) {
+            return 0L;
+        }
+        long intervalNanos = Math.max(MIN_INTERVAL_NANOS, TimeUnit.SECONDS.toNanos(1) / operationsPerSecond);
+        return (long) (operationCount - 1) * intervalNanos;
     }
 
     private void executeClosedLoopWorkload(int operationCount,
