@@ -19,6 +19,8 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -115,6 +117,7 @@ class H2OpenLoopLatencyIntegrationTest {
 
             Map<SqlType, List<Long>> sqlLatencies = initializeLatencyMap(SqlType.class);
             Map<StepType, List<Long>> stepLatencies = initializeLatencyMap(StepType.class);
+            FailureTracker failureTracker = new FailureTracker();
 
             List<Integer> activeIds = new ArrayList<>(INITIAL_ROWS);
             for (int i = 1; i <= INITIAL_ROWS; i++) {
@@ -122,13 +125,15 @@ class H2OpenLoopLatencyIntegrationTest {
             }
 
             long fullTestStartNanos = System.nanoTime();
-            runSelectQueries(loopMode, sqlLatencies, stepLatencies, activeIds);
-            runWriteQueries(loopMode, sqlLatencies, stepLatencies, activeIds);
+            runSelectQueries(loopMode, sqlLatencies, stepLatencies, activeIds, failureTracker);
+            runWriteQueries(loopMode, sqlLatencies, stepLatencies, activeIds, failureTracker);
             long fullTestDurationNanos = System.nanoTime() - fullTestStartNanos;
             int totalOperations = SELECT_QUERY_COUNT + WRITE_OPERATION_COUNT;
 
+            logLatencyReport(loopMode, sqlLatencies, stepLatencies, fullTestDurationNanos, totalOperations, failureTracker);
+            assertEquals(0, failureTracker.getTotalExceptions(),
+                    "Unexpected SQL workload exceptions. See FAILURE SUMMARY section in report.");
             assertExpectedCounts(sqlLatencies, stepLatencies);
-            logLatencyReport(loopMode, sqlLatencies, stepLatencies, fullTestDurationNanos, totalOperations);
             loopResults.put(loopMode, new LoopRunResult(sqlLatencies, stepLatencies,
                     fullTestDurationNanos, totalOperations));
         }
@@ -169,8 +174,9 @@ class H2OpenLoopLatencyIntegrationTest {
     private void runSelectQueries(LoopMode loopMode,
                                   Map<SqlType, List<Long>> sqlLatencies,
                                   Map<StepType, List<Long>> stepLatencies,
-                                  List<Integer> activeIds) throws SQLException {
-        executeWorkload(loopMode, SELECT_QUERY_COUNT, SELECT_OPEN_LOOP_RATE_PER_SECOND, operationIndex -> {
+                                  List<Integer> activeIds,
+                                  FailureTracker failureTracker) throws SQLException {
+        executeWorkload(loopMode, SELECT_QUERY_COUNT, SELECT_OPEN_LOOP_RATE_PER_SECOND, failureTracker, operationIndex -> {
             int id = activeIds.get(ThreadLocalRandom.current().nextInt(activeIds.size()));
             withInstrumentedConnection(stepLatencies, connection -> {
                 try (PreparedStatement select = connection.prepareStatement(
@@ -190,10 +196,11 @@ class H2OpenLoopLatencyIntegrationTest {
     private void runWriteQueries(LoopMode loopMode,
                                  Map<SqlType, List<Long>> sqlLatencies,
                                  Map<StepType, List<Long>> stepLatencies,
-                                 List<Integer> activeIds) throws SQLException {
+                                 List<Integer> activeIds,
+                                 FailureTracker failureTracker) throws SQLException {
         AtomicInteger nextInsertId = new AtomicInteger(INITIAL_ROWS + 1);
         Object activeIdsLock = new Object();
-        executeWorkload(loopMode, WRITE_OPERATION_COUNT, WRITE_OPEN_LOOP_RATE_PER_SECOND, operationIndex -> {
+        executeWorkload(loopMode, WRITE_OPERATION_COUNT, WRITE_OPEN_LOOP_RATE_PER_SECOND, failureTracker, operationIndex -> {
             int operationType = operationIndex % WRITE_OPERATION_TYPE_COUNT;
             if (operationType == 0) {
                 int newId = nextInsertId.getAndIncrement();
@@ -254,7 +261,8 @@ class H2OpenLoopLatencyIntegrationTest {
                                   Map<SqlType, List<Long>> sqlLatencies,
                                   Map<StepType, List<Long>> stepLatencies,
                                   long fullTestDurationNanos,
-                                  int totalOperations) {
+                                  int totalOperations,
+                                  FailureTracker failureTracker) {
         StringBuilder report = new StringBuilder();
         double fullTestDurationMs = nanosToMillis(fullTestDurationNanos);
         double fullTestAvgPerOperationMs = calculateAverageMsPerOperation(fullTestDurationNanos, totalOperations);
@@ -267,6 +275,9 @@ class H2OpenLoopLatencyIntegrationTest {
         report.append(String.format("INSERT operations: %d%n", sqlLatencies.get(SqlType.INSERT).size()));
         report.append(String.format("UPDATE operations: %d%n", sqlLatencies.get(SqlType.UPDATE).size()));
         report.append(String.format("DELETE operations: %d%n", sqlLatencies.get(SqlType.DELETE).size()));
+        report.append('\n');
+
+        appendFailureSummary(report, failureTracker);
         report.append('\n');
 
         appendLatencyLine(report, "SELECT", sqlLatencies.get(SqlType.SELECT));
@@ -293,6 +304,19 @@ class H2OpenLoopLatencyIntegrationTest {
         report.append("request/response touch points where parse work can happen, and serves as an upper-bound proxy.\n");
 
         log.info(report.toString());
+    }
+
+    private void appendFailureSummary(StringBuilder report, FailureTracker failureTracker) {
+        report.append("=== FAILURE SUMMARY ===\n");
+        report.append(String.format("Total exceptions: %d%n", failureTracker.getTotalExceptions()));
+        Map<String, Integer> exceptionCounts = failureTracker.snapshotExceptionCounts();
+        if (exceptionCounts.isEmpty()) {
+            report.append("No exceptions recorded.\n");
+            return;
+        }
+        for (Map.Entry<String, Integer> entry : exceptionCounts.entrySet()) {
+            report.append(String.format("%s -> %d%n", entry.getKey(), entry.getValue()));
+        }
     }
 
     private void logModeComparison(Map<LoopMode, LoopRunResult> loopResults) {
@@ -536,23 +560,30 @@ class H2OpenLoopLatencyIntegrationTest {
     private void executeWorkload(LoopMode loopMode,
                                  int operationCount,
                                  int operationsPerSecond,
+                                 FailureTracker failureTracker,
                                  IndexedSqlOperation operation) throws SQLException {
         if (loopMode == LoopMode.OPEN_LOOP) {
-            executeOpenLoopWorkload(operationCount, operationsPerSecond, operation);
+            executeOpenLoopWorkload(operationCount, operationsPerSecond, failureTracker, operation);
             return;
         }
-        executeClosedLoopWorkload(operationCount, operation);
+        executeClosedLoopWorkload(operationCount, failureTracker, operation);
     }
 
     private void executeClosedLoopWorkload(int operationCount,
+                                           FailureTracker failureTracker,
                                            IndexedSqlOperation operation) throws SQLException {
         for (int i = 0; i < operationCount; i++) {
-            operation.run(i);
+            try {
+                operation.run(i);
+            } catch (SQLException e) {
+                failureTracker.record(e);
+            }
         }
     }
 
     private void executeOpenLoopWorkload(int operationCount,
                                          int operationsPerSecond,
+                                         FailureTracker failureTracker,
                                          IndexedSqlOperation operation) throws SQLException {
         if (operationsPerSecond <= 0) {
             throw new SQLException("operationsPerSecond must be greater than zero");
@@ -576,7 +607,6 @@ class H2OpenLoopLatencyIntegrationTest {
         }
 
         executorService.shutdown();
-        SQLException firstSqlException = null;
         for (Future<?> future : futures) {
             try {
                 future.get();
@@ -584,12 +614,7 @@ class H2OpenLoopLatencyIntegrationTest {
                 Thread.currentThread().interrupt();
                 throw new SQLException("Open-loop workload interrupted", e);
             } catch (ExecutionException e) {
-                SQLException sqlException = extractSqlException(e);
-                if (firstSqlException == null) {
-                    firstSqlException = sqlException;
-                } else {
-                    firstSqlException.addSuppressed(sqlException);
-                }
+                failureTracker.record(extractSqlException(e));
             }
         }
 
@@ -600,10 +625,6 @@ class H2OpenLoopLatencyIntegrationTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new SQLException("Interrupted while terminating open-loop workload", e);
-        }
-
-        if (firstSqlException != null) {
-            throw firstSqlException;
         }
     }
 
@@ -626,5 +647,39 @@ class H2OpenLoopLatencyIntegrationTest {
             cause = cause.getCause();
         }
         return new SQLException("Open-loop operation failed", executionException.getCause());
+    }
+
+    private static final class FailureTracker {
+        private static final String NO_MESSAGE = "<no-message>";
+        private final AtomicInteger totalExceptions = new AtomicInteger();
+        private final Map<String, AtomicInteger> exceptionCounts = new ConcurrentHashMap<>();
+
+        void record(Throwable throwable) {
+            Throwable rootCause = unwrapRootCause(throwable);
+            String message = rootCause.getMessage();
+            String key = rootCause.getClass().getName() + " | " + (message == null ? NO_MESSAGE : message);
+            exceptionCounts.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
+            totalExceptions.incrementAndGet();
+        }
+
+        int getTotalExceptions() {
+            return totalExceptions.get();
+        }
+
+        Map<String, Integer> snapshotExceptionCounts() {
+            Map<String, Integer> snapshot = new TreeMap<>();
+            for (Map.Entry<String, AtomicInteger> entry : exceptionCounts.entrySet()) {
+                snapshot.put(entry.getKey(), entry.getValue().get());
+            }
+            return snapshot;
+        }
+
+        private Throwable unwrapRootCause(Throwable throwable) {
+            Throwable current = throwable;
+            while (current.getCause() != null) {
+                current = current.getCause();
+            }
+            return current;
+        }
     }
 }
