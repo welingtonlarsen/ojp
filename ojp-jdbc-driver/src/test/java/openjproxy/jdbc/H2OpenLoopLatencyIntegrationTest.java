@@ -310,9 +310,12 @@ class H2OpenLoopLatencyIntegrationTest {
         } finally {
             if (connection != null) {
                 long closeStart = System.nanoTime();
-                connection.close();
-                if (operationSucceeded) {
-                    stepLatencies.get(StepType.CLOSE).add(System.nanoTime() - closeStart);
+                try {
+                    connection.close();
+                } finally {
+                    if (operationSucceeded) {
+                        stepLatencies.get(StepType.CLOSE).add(System.nanoTime() - closeStart);
+                    }
                 }
             }
         }
