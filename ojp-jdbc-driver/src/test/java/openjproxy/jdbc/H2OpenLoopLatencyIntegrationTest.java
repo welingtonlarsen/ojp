@@ -126,7 +126,7 @@ class H2OpenLoopLatencyIntegrationTest {
 
             assertExpectedCounts(sqlLatencies, stepLatencies);
             logLatencyReport(loopMode, sqlLatencies, stepLatencies);
-            loopResults.put(loopMode, new LoopRunResult(loopMode, sqlLatencies, stepLatencies));
+            loopResults.put(loopMode, new LoopRunResult(sqlLatencies, stepLatencies));
         }
 
         logModeComparison(loopResults);
@@ -361,18 +361,12 @@ class H2OpenLoopLatencyIntegrationTest {
     }
 
     private static class LoopRunResult {
-        private final LoopMode loopMode;
         private final Map<SqlType, List<Long>> sqlLatencies;
         private final Map<StepType, List<Long>> stepLatencies;
 
-        LoopRunResult(LoopMode loopMode, Map<SqlType, List<Long>> sqlLatencies, Map<StepType, List<Long>> stepLatencies) {
-            this.loopMode = loopMode;
+        LoopRunResult(Map<SqlType, List<Long>> sqlLatencies, Map<StepType, List<Long>> stepLatencies) {
             this.sqlLatencies = sqlLatencies;
             this.stepLatencies = stepLatencies;
-        }
-
-        LoopMode getLoopMode() {
-            return loopMode;
         }
 
         Map<SqlType, List<Long>> getSqlLatencies() {
@@ -434,7 +428,7 @@ class H2OpenLoopLatencyIntegrationTest {
         if ("OPEN".equals(normalized)) {
             return LoopMode.OPEN_LOOP;
         }
-        if ("CLOSE".equals(normalized) || "CLOSED".equals(normalized)) {
+        if ("CLOSED".equals(normalized)) {
             return LoopMode.CLOSED_LOOP;
         }
         if ("BOTH".equals(normalized)) {
