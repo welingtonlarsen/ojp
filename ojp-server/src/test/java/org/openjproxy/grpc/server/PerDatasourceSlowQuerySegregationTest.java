@@ -99,7 +99,7 @@ class PerDatasourceSlowQuerySegregationTest {
         actionContextField.setAccessible(true);
         ActionContext actionContext = (ActionContext) actionContextField.get(statementService);
 
-        Map<String, AdmissionControlManager> managers = actionContext.getSlowQuerySegregationManagers();
+        Map<String, AdmissionControlManager> managers = actionContext.getAdmissionControlManagers();
 
         // Verify that we have two separate managers
         assertEquals(2, managers.size(), "Should have created separate managers for each datasource");

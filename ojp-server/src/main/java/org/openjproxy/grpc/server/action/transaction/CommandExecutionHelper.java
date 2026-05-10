@@ -127,14 +127,14 @@ public class CommandExecutionHelper {
      */
     private static AdmissionControlManager getAdmissionControlManagerForConnection(ActionContext context,
                                                                                            String connHash) {
-        var slowQuerySegregationManagers = context.getSlowQuerySegregationManagers();
+        var admissionControlManagers = context.getAdmissionControlManagers();
 
-        AdmissionControlManager manager = slowQuerySegregationManagers.get(connHash);
+        AdmissionControlManager manager = admissionControlManagers.get(connHash);
         if (manager == null) {
             log.warn("No AdmissionControlManager found for connection hash {}, creating disabled fallback",
                     connHash);
             manager = new AdmissionControlManager(1, 0, 0, 0, 0, 0, false);
-            slowQuerySegregationManagers.put(connHash, manager);
+            admissionControlManagers.put(connHash, manager);
         }
         return manager;
     }

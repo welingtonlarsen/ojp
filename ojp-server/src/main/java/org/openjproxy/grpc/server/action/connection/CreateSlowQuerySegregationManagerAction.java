@@ -63,7 +63,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     context.getServerConfiguration().getSlowQueryUpdateGlobalAvgInterval(),
                     true
                 );
-                context.getSlowQuerySegregationManagers().put(connHash, manager);
+                context.getAdmissionControlManagers().put(connHash, manager);
                 log.info("Created AdmissionControlManager for XA datasource {} with pool size {} (slow query segregation enabled)",
                         connHash, actualPoolSize);
             } else {
@@ -79,7 +79,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     0, // updateGlobalAvgInterval = 0 means no performance monitoring
                     true // enabled = true to use SlotManager
                 );
-                context.getSlowQuerySegregationManagers().put(connHash, manager);
+                context.getAdmissionControlManagers().put(connHash, manager);
                 log.info("Created AdmissionControlManager for XA datasource {} with {} slots (all fast, timeout={}ms, no performance monitoring)",
                         connHash, actualPoolSize, fastSlotTimeoutMillis);
             }
@@ -95,7 +95,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     context.getServerConfiguration().getSlowQueryUpdateGlobalAvgInterval(),
                     true
                 );
-                context.getSlowQuerySegregationManagers().put(connHash, manager);
+                context.getAdmissionControlManagers().put(connHash, manager);
                 log.info("Created AdmissionControlManager for datasource {} with pool size {}",
                         connHash, actualPoolSize);
             } else {
@@ -109,7 +109,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     0,
                     true
                 );
-                context.getSlowQuerySegregationManagers().put(connHash, manager);
+                context.getAdmissionControlManagers().put(connHash, manager);
                 log.info("Created admission-control-only AdmissionControlManager for datasource {} with pool size {} and timeout {}ms",
                         connHash, actualPoolSize, fastSlotTimeoutMillis);
             }

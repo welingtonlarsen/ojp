@@ -70,11 +70,11 @@ public class ActionContext {
 
     /**
      * Map of connection hash to AdmissionControlManager.
-     * Each datasource gets its own manager for segregating slow/fast queries.
+     * Each datasource gets its own manager for admission control and optional slow/fast segregation.
      * Key: connection hash
-     * Value: manager for this datasource's slow query segregation
+     * Value: manager for this datasource
      */
-    private final Map<String, AdmissionControlManager> slowQuerySegregationManagers;
+    private final Map<String, AdmissionControlManager> admissionControlManagers;
 
     /**
      * Map of connection hash to CacheConfiguration.
@@ -146,7 +146,7 @@ public class ActionContext {
             Map<String, XATransactionRegistry> xaRegistries,
             Map<String, UnpooledConnectionDetails> unpooledConnectionDetailsMap,
             Map<String, DbName> dbNameMap,
-            Map<String, AdmissionControlManager> slowQuerySegregationManagers,
+            Map<String, AdmissionControlManager> admissionControlManagers,
             Map<String, org.openjproxy.grpc.server.cache.CacheConfiguration> cacheConfigurationMap,
             XAConnectionPoolProvider xaPoolProvider,
             MultinodeXaCoordinator xaCoordinator,
@@ -161,7 +161,7 @@ public class ActionContext {
         this.xaRegistries = xaRegistries;
         this.unpooledConnectionDetailsMap = unpooledConnectionDetailsMap;
         this.dbNameMap = dbNameMap;
-        this.slowQuerySegregationManagers = slowQuerySegregationManagers;
+        this.admissionControlManagers = admissionControlManagers;
         this.cacheConfigurationMap = cacheConfigurationMap;
         this.xaPoolProvider = xaPoolProvider;
         this.xaCoordinator = xaCoordinator;
@@ -195,8 +195,8 @@ public class ActionContext {
         return dbNameMap;
     }
 
-    public Map<String, AdmissionControlManager> getSlowQuerySegregationManagers() {
-        return slowQuerySegregationManagers;
+    public Map<String, AdmissionControlManager> getAdmissionControlManagers() {
+        return admissionControlManagers;
     }
 
     public Map<String, org.openjproxy.grpc.server.cache.CacheConfiguration> getCacheConfigurationMap() {
