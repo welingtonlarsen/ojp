@@ -15,10 +15,18 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,6 +52,8 @@ class H2OpenLoopLatencyIntegrationTest {
     private static final int WRITE_OPERATION_COUNT = 1000;
     private static final int WRITE_OPERATION_TYPE_COUNT = 3;
     private static final int HIKARI_POOL_SIZE = 100;
+    private static final int SELECT_OPEN_LOOP_RATE_PER_SECOND = 250;
+    private static final int WRITE_OPEN_LOOP_RATE_PER_SECOND = 250;
 
     private static boolean isH2TestEnabled;
     private HikariDataSource dataSource;
@@ -97,9 +107,8 @@ class H2OpenLoopLatencyIntegrationTest {
             activeIds.add(i);
         }
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        runSelectQueries(sqlLatencies, stepLatencies, activeIds, random);
-        runWriteQueries(sqlLatencies, stepLatencies, activeIds, random);
+        runSelectQueries(sqlLatencies, stepLatencies, activeIds);
+        runWriteQueries(sqlLatencies, stepLatencies, activeIds);
 
         assertEquals(SELECT_QUERY_COUNT, sqlLatencies.get(SqlType.SELECT).size());
         assertEquals(WRITE_OPERATION_COUNT, sqlLatencies.get(SqlType.INSERT).size()
@@ -148,10 +157,9 @@ class H2OpenLoopLatencyIntegrationTest {
 
     private void runSelectQueries(Map<SqlType, List<Long>> sqlLatencies,
                                   Map<StepType, List<Long>> stepLatencies,
-                                  List<Integer> activeIds,
-                                  ThreadLocalRandom random) throws SQLException {
-        for (int i = 0; i < SELECT_QUERY_COUNT; i++) {
-            int id = activeIds.get(random.nextInt(activeIds.size()));
+                                  List<Integer> activeIds) throws SQLException {
+        executeOpenLoopWorkload(SELECT_QUERY_COUNT, SELECT_OPEN_LOOP_RATE_PER_SECOND, operationIndex -> {
+            int id = activeIds.get(ThreadLocalRandom.current().nextInt(activeIds.size()));
             withInstrumentedConnection(stepLatencies, connection -> {
                 try (PreparedStatement select = connection.prepareStatement(
                         "SELECT name FROM " + TABLE_NAME + " WHERE id = ?")) {
@@ -164,18 +172,18 @@ class H2OpenLoopLatencyIntegrationTest {
                     sqlLatencies.get(SqlType.SELECT).add(latency);
                 }
             });
-        }
+        });
     }
 
     private void runWriteQueries(Map<SqlType, List<Long>> sqlLatencies,
                                  Map<StepType, List<Long>> stepLatencies,
-                                 List<Integer> activeIds,
-                                 ThreadLocalRandom random) throws SQLException {
-        int nextInsertId = INITIAL_ROWS + 1;
-        for (int i = 0; i < WRITE_OPERATION_COUNT; i++) {
-            int operationType = i % WRITE_OPERATION_TYPE_COUNT;
+                                 List<Integer> activeIds) throws SQLException {
+        AtomicInteger nextInsertId = new AtomicInteger(INITIAL_ROWS + 1);
+        Object activeIdsLock = new Object();
+        executeOpenLoopWorkload(WRITE_OPERATION_COUNT, WRITE_OPEN_LOOP_RATE_PER_SECOND, operationIndex -> {
+            int operationType = operationIndex % WRITE_OPERATION_TYPE_COUNT;
             if (operationType == 0) {
-                int newId = nextInsertId++;
+                int newId = nextInsertId.getAndIncrement();
                 withInstrumentedConnection(stepLatencies, connection -> {
                     try (PreparedStatement insert = connection.prepareStatement(
                             "INSERT INTO " + TABLE_NAME + " (id, name) VALUES (?, ?)")) {
@@ -188,9 +196,14 @@ class H2OpenLoopLatencyIntegrationTest {
                         sqlLatencies.get(SqlType.INSERT).add(latency);
                     }
                 });
-                activeIds.add(newId);
+                synchronized (activeIdsLock) {
+                    activeIds.add(newId);
+                }
             } else if (operationType == 1) {
-                int idToUpdate = activeIds.get(random.nextInt(activeIds.size()));
+                int idToUpdate;
+                synchronized (activeIdsLock) {
+                    idToUpdate = activeIds.get(ThreadLocalRandom.current().nextInt(activeIds.size()));
+                }
                 withInstrumentedConnection(stepLatencies, connection -> {
                     try (PreparedStatement update = connection.prepareStatement(
                             "UPDATE " + TABLE_NAME + " SET name = ? WHERE id = ?")) {
@@ -204,8 +217,11 @@ class H2OpenLoopLatencyIntegrationTest {
                     }
                 });
             } else {
-                int deleteIndex = random.nextInt(activeIds.size());
-                int idToDelete = activeIds.remove(deleteIndex);
+                int idToDelete;
+                synchronized (activeIdsLock) {
+                    int deleteIndex = ThreadLocalRandom.current().nextInt(activeIds.size());
+                    idToDelete = activeIds.remove(deleteIndex);
+                }
                 withInstrumentedConnection(stepLatencies, connection -> {
                     try (PreparedStatement delete = connection.prepareStatement(
                             "DELETE FROM " + TABLE_NAME + " WHERE id = ?")) {
@@ -218,7 +234,7 @@ class H2OpenLoopLatencyIntegrationTest {
                     }
                 });
             }
-        }
+        });
     }
 
     private void logLatencyReport(Map<SqlType, List<Long>> sqlLatencies,
@@ -272,7 +288,7 @@ class H2OpenLoopLatencyIntegrationTest {
     private <E extends Enum<E>> Map<E, List<Long>> initializeLatencyMap(Class<E> enumClass) {
         Map<E, List<Long>> map = new EnumMap<>(enumClass);
         for (E value : enumClass.getEnumConstants()) {
-            map.put(value, new ArrayList<>());
+            map.put(value, Collections.synchronizedList(new ArrayList<>()));
         }
         return map;
     }
@@ -285,6 +301,11 @@ class H2OpenLoopLatencyIntegrationTest {
     @FunctionalInterface
     private interface ConnectionOperation {
         void run(Connection connection) throws SQLException;
+    }
+
+    @FunctionalInterface
+    private interface IndexedSqlOperation {
+        void run(int operationIndex) throws SQLException;
     }
 
     private long measureStepLatency(Map<StepType, List<Long>> stepLatencies,
@@ -316,5 +337,77 @@ class H2OpenLoopLatencyIntegrationTest {
                 }
             }
         }
+    }
+
+    private void executeOpenLoopWorkload(int operationCount,
+                                         int operationsPerSecond,
+                                         IndexedSqlOperation operation) throws SQLException {
+        ExecutorService executorService = Executors.newFixedThreadPool(HIKARI_POOL_SIZE);
+        List<Future<?>> futures = new ArrayList<>(operationCount);
+        long intervalNanos = Math.max(1L, TimeUnit.SECONDS.toNanos(1) / operationsPerSecond);
+        long startTimeNanos = System.nanoTime();
+
+        for (int i = 0; i < operationCount; i++) {
+            long targetTimeNanos = startTimeNanos + (long) i * intervalNanos;
+            waitUntil(targetTimeNanos);
+            final int operationIndex = i;
+            futures.add(executorService.submit(() -> {
+                try {
+                    operation.run(operationIndex);
+                } catch (SQLException e) {
+                    throw new RuntimeException(e);
+                }
+            }));
+        }
+
+        executorService.shutdown();
+        SQLException firstSqlException = null;
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new SQLException("Open-loop workload interrupted", e);
+            } catch (ExecutionException e) {
+                SQLException sqlException = extractSqlException(e);
+                if (firstSqlException == null) {
+                    firstSqlException = sqlException;
+                }
+            }
+        }
+
+        try {
+            if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SQLException("Interrupted while terminating open-loop workload", e);
+        }
+
+        if (firstSqlException != null) {
+            throw firstSqlException;
+        }
+    }
+
+    private void waitUntil(long targetTimeNanos) {
+        while (true) {
+            long remainingNanos = targetTimeNanos - System.nanoTime();
+            if (remainingNanos <= 0L) {
+                return;
+            }
+            LockSupport.parkNanos(Math.min(remainingNanos, TimeUnit.MILLISECONDS.toNanos(1)));
+        }
+    }
+
+    private SQLException extractSqlException(ExecutionException executionException) {
+        Throwable cause = executionException.getCause();
+        if (cause instanceof RuntimeException && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        if (cause instanceof SQLException) {
+            return (SQLException) cause;
+        }
+        return new SQLException("Open-loop operation failed", cause);
     }
 }
