@@ -259,8 +259,8 @@ class H2OpenLoopLatencyIntegrationTest {
         double fullTestDurationMs = nanosToMillis(fullTestDurationNanos);
         double fullTestAvgPerOperationMs = calculateAverageMsPerOperation(fullTestDurationNanos, totalOperations);
         report.append(String.format("%n=== H2 LATENCY REPORT (%s) ===%n", loopMode));
-        report.append(String.format("Full test total time: %.3f ms%n", fullTestDurationMs));
-        report.append(String.format("Full test average time per operation (total/ops): %.3f ms%n",
+        report.append(String.format("Full test wall-clock time (start->end): %.3f ms%n", fullTestDurationMs));
+        report.append(String.format("Full test average time per operation (wall-clock/ops): %.3f ms%n",
                 fullTestAvgPerOperationMs));
         report.append(String.format("Total operations: %d%n", totalOperations));
         report.append(String.format("SELECT operations: %d%n", sqlLatencies.get(SqlType.SELECT).size()));
@@ -330,7 +330,7 @@ class H2OpenLoopLatencyIntegrationTest {
                 calculateMedianMs(closedLoopResult.getStepLatencies().get(StepType.CLOSE)));
         report.append('\n');
         report.append("=== FULL TEST DURATION COMPARISON ===\n");
-        appendDurationComparisonLine(report, "full-test-total-time",
+        appendDurationComparisonLine(report, "full-test-wall-clock-time(start-end)",
                 openLoopResult.getFullTestDurationNanos(), closedLoopResult.getFullTestDurationNanos());
         appendDurationPerOperationComparisonLine(report, "full-test-average-per-operation",
                 openLoopResult.getFullTestDurationNanos(), openLoopResult.getTotalOperations(),
