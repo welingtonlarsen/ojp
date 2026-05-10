@@ -650,14 +650,17 @@ class H2OpenLoopLatencyIntegrationTest {
     }
 
     private static final class FailureTracker {
-        private static final String NO_MESSAGE = "<no-message>";
+        private static final String NO_EXCEPTION_MESSAGE_MARKER = "<no-message>";
+        private static final int MAX_CAUSE_UNWRAP_DEPTH = 100;
         private final AtomicInteger totalExceptions = new AtomicInteger();
         private final Map<String, AtomicInteger> exceptionCounts = new ConcurrentHashMap<>();
 
         void record(Throwable throwable) {
             Throwable rootCause = unwrapRootCause(throwable);
-            String message = rootCause.getMessage();
-            String key = rootCause.getClass().getName() + " | " + (message == null ? NO_MESSAGE : message);
+            String message = rootCause.getMessage() == null
+                    ? NO_EXCEPTION_MESSAGE_MARKER
+                    : rootCause.getMessage().replace("\n", "\\n").replace("\r", "\\r");
+            String key = rootCause.getClass().getName() + " | message=\"" + message + "\"";
             exceptionCounts.computeIfAbsent(key, ignored -> new AtomicInteger()).incrementAndGet();
             totalExceptions.incrementAndGet();
         }
@@ -676,8 +679,10 @@ class H2OpenLoopLatencyIntegrationTest {
 
         private Throwable unwrapRootCause(Throwable throwable) {
             Throwable current = throwable;
-            while (current.getCause() != null) {
+            int depth = 0;
+            while (current.getCause() != null && depth < MAX_CAUSE_UNWRAP_DEPTH) {
                 current = current.getCause();
+                depth++;
             }
             return current;
         }
