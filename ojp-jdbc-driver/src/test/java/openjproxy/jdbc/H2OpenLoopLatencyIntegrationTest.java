@@ -133,7 +133,7 @@ class H2OpenLoopLatencyIntegrationTest {
     private void runWriteQueries(Map<SqlType, List<Long>> latenciesByType,
                                  List<Integer> activeIds,
                                  ThreadLocalRandom random) throws SQLException {
-        int nextId = INITIAL_ROWS + 1;
+        int nextInsertId = INITIAL_ROWS + 1;
         try (PreparedStatement insert = connection.prepareStatement(
                 "INSERT INTO " + TABLE_NAME + " (id, name) VALUES (?, ?)");
              PreparedStatement update = connection.prepareStatement(
@@ -143,7 +143,7 @@ class H2OpenLoopLatencyIntegrationTest {
             for (int i = 0; i < WRITE_OPERATION_COUNT; i++) {
                 int operationType = i % 3;
                 if (operationType == 0) {
-                    int newId = nextId++;
+                    int newId = nextInsertId++;
                     long latency = measureLatency(() -> {
                         insert.setInt(1, newId);
                         insert.setString(2, "insert-" + newId);
