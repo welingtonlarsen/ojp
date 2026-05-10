@@ -300,22 +300,19 @@ class H2OpenLoopLatencyIntegrationTest {
     private void withInstrumentedConnection(Map<StepType, List<Long>> stepLatencies,
                                             ConnectionOperation operation) throws SQLException {
         Connection connection = null;
-        boolean operationSucceeded = false;
         try {
             long connectStart = System.nanoTime();
             connection = dataSource.getConnection();
             stepLatencies.get(StepType.CONNECT).add(System.nanoTime() - connectStart);
             operation.run(connection);
-            operationSucceeded = true;
         } finally {
             if (connection != null) {
                 long closeStart = System.nanoTime();
                 try {
                     connection.close();
                 } finally {
-                    if (operationSucceeded) {
-                        stepLatencies.get(StepType.CLOSE).add(System.nanoTime() - closeStart);
-                    }
+                    // Include both success-path and error-path close costs in diagnostics.
+                    stepLatencies.get(StepType.CLOSE).add(System.nanoTime() - closeStart);
                 }
             }
         }
