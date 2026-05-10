@@ -10,7 +10,7 @@ Yes, OJP should expose prepared statement cache settings in **OJP standard prope
 
 ---
 
-## Proposed Standard Properties (Server-Side Canonical)
+## Proposed Standard Properties (Server-Side Canonical, Global Only)
 
 ### Non-XA
 
@@ -32,22 +32,6 @@ ojp.xa.connection.pool.statementCache.serverPrepare=true
 ojp.xa.connection.pool.statementCache.prepareThreshold=5
 ```
 
-### Optional Per-Database Overrides
-
-```properties
-ojp.connection.pool.statementCache.postgres.prepareThreshold=3
-ojp.connection.pool.statementCache.mysql.maxSize=300
-```
-
-Also supported with datasource prefix:
-
-```properties
-orders.ojp.connection.pool.statementCache.maxSize=500
-orders.ojp.connection.pool.statementCache.postgres.prepareThreshold=3
-```
-
----
-
 ## Runtime Translation Model
 
 At datasource creation time, OJP resolves canonical statement cache settings and translates them to database-driver properties:
@@ -66,14 +50,28 @@ If unsupported for a given driver/version, OJP should skip the mapping and log a
 ## Precedence and Safety
 
 Property precedence (highest to lowest):
-1. datasource-scoped key (`<ds>.ojp...`)
-2. global key (`ojp...`)
-3. OJP default
+1. global key (`ojp...`)
+2. OJP default
 
 Safety rules:
 - `enabled=false` means no statement-cache driver properties are emitted.
 - Invalid numeric values fall back to defaults with warning.
-- Effective resolved values are logged once per datasource/pool creation.
+- Effective resolved values are logged once per pool creation.
+
+---
+
+## Meaning, Units, and Scope
+
+These settings are **server-global defaults**. They are not configured per datasource in this design.
+
+- `statementCache.enabled` (`true/false`): master toggle for statement cache translation.
+- `statementCache.maxSize` (count): maximum cached prepared statements. **Unit: number of statements, not bytes**.
+- `statementCache.sqlLimit` (bytes/characters depending on driver semantics): max SQL length eligible for cache.
+- `statementCache.serverPrepare` (`true/false`): requests server-side prepare where supported by the driver.
+- `statementCache.prepareThreshold` (count): executions before server-side prepare is used (driver-dependent).
+
+**Application scope:** The canonical keys are global in OJP server config, then applied when each pool/datasource is created.
+So limits like `maxSize=250` are interpreted by the target driver/pool as cache-entry counts (for example, typically per physical JDBC connection in drivers like MySQL), not memory sizes.
 
 ---
 
@@ -90,4 +88,3 @@ Safety rules:
 
 - **Design only** (this document).
 - **No code changes proposed in this report.**
-

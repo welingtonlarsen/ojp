@@ -48,7 +48,7 @@ This means the feature is architecturally compatible with existing design patter
 
 ---
 
-## 4. Proposed Canonical Property Surface
+## 4. Proposed Canonical Property Surface (Global Server Settings Only)
 
 ### 4.1 Non-XA Global Canonical Keys
 
@@ -70,30 +70,8 @@ ojp.xa.connection.pool.statementCache.serverPrepare=true
 ojp.xa.connection.pool.statementCache.prepareThreshold=5
 ```
 
-### 4.3 Optional Per-Database Override Keys
-
-```properties
-ojp.connection.pool.statementCache.<db>.enabled
-ojp.connection.pool.statementCache.<db>.maxSize
-ojp.connection.pool.statementCache.<db>.sqlLimit
-ojp.connection.pool.statementCache.<db>.serverPrepare
-ojp.connection.pool.statementCache.<db>.prepareThreshold
-```
-
-Where `<db>` is one of:
-`postgres`, `cockroach`, `mysql`, `mariadb`, `sqlserver`, `oracle`, `db2`, `h2`.
-
-### 4.4 Datasource-Scoped Variant
-
-All keys above can be prefixed with datasource name:
-
-```properties
-orders.ojp.connection.pool.statementCache.enabled=true
-orders.ojp.connection.pool.statementCache.maxSize=500
-orders.ojp.connection.pool.statementCache.postgres.prepareThreshold=3
-```
-
-This follows OJP’s existing per-datasource property model.
+No datasource-scoped or per-database override keys are included in this design revision.
+Only the global server keys in 4.1 and 4.2 are allowed.
 
 ---
 
@@ -124,21 +102,53 @@ Notes:
 
 - If `enabled=false`, no statement-cache keys are emitted for the datasource.
 - If a property is not supported by the current driver/version, OJP should skip and log.
-- Database-specific overrides (if provided) should win over generic canonical values.
 
 ---
 
-## 6. Resolution and Precedence Rules
+## 6. Meaning, Units, and Scope
 
-### 6.1 Precedence (High -> Low)
+This section clarifies what each setting means and where it applies.
 
-1. datasource-specific + database-specific (`orders.ojp.connection.pool.statementCache.postgres.*`)
-2. datasource-specific generic (`orders.ojp.connection.pool.statementCache.*`)
-3. global database-specific (`ojp.connection.pool.statementCache.postgres.*`)
-4. global generic (`ojp.connection.pool.statementCache.*`)
-5. hardcoded defaults
+### 6.1 Setting Semantics
 
-### 6.2 Validation Rules
+- `statementCache.enabled`  
+  **Type:** boolean  
+  **Meaning:** master on/off flag for statement cache property translation.
+
+- `statementCache.maxSize`  
+  **Type:** integer (count)  
+  **Meaning:** maximum number of cached prepared statements.  
+  **Unit:** statement entries (not KB/MB).
+
+- `statementCache.sqlLimit`  
+  **Type:** integer  
+  **Meaning:** maximum SQL statement length considered for caching.  
+  **Unit:** length limit passed to driver (commonly bytes/characters per driver semantics).
+
+- `statementCache.serverPrepare`  
+  **Type:** boolean  
+  **Meaning:** requests server-side prepared statements where the driver supports it.
+
+- `statementCache.prepareThreshold`  
+  **Type:** integer (count)  
+  **Meaning:** execution-count threshold before server-side prepare is used (driver-dependent behavior).
+
+### 6.2 Scope of Application
+
+- Canonical keys are configured once at OJP server level (global scope).
+- At runtime, they are translated and applied when each datasource/pool is instantiated.
+- Practical cache behavior is determined by the target JDBC driver/pool implementation. For common drivers, cache size values like `250` are interpreted as **number of statement entries, typically per physical JDBC connection**, not as memory size.
+
+---
+
+## 7. Resolution and Precedence Rules
+
+### 7.1 Precedence (High -> Low)
+
+1. global generic (`ojp.connection.pool.statementCache.*` / `ojp.xa.connection.pool.statementCache.*`)
+2. hardcoded defaults
+
+### 7.2 Validation Rules
 
 - `maxSize >= 0`
 - `sqlLimit >= 0`
@@ -152,7 +162,7 @@ If invalid values are supplied:
 
 ---
 
-## 7. Observability and Operational Behavior
+## 8. Observability and Operational Behavior
 
 Recommended runtime visibility:
 
@@ -164,7 +174,7 @@ This helps users confirm that OJP, not app-side JDBC URL properties, is controll
 
 ---
 
-## 8. Backward Compatibility
+## 9. Backward Compatibility
 
 - Existing deployments without any statement cache keys should continue to work.
 - New defaults turn caching on unless explicitly disabled.
@@ -173,18 +183,18 @@ This helps users confirm that OJP, not app-side JDBC URL properties, is controll
 
 ---
 
-## 9. Risks and Mitigations
+## 10. Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Driver property mismatch across versions | Wrong behavior or ignored settings | Keep translation map explicit by driver family/version docs; log applied keys |
-| Over-aggressive defaults in some workloads | Memory/CPU impact | Expose `maxSize`, `sqlLimit`, threshold knobs; allow per-datasource tuning |
+| Over-aggressive defaults in some workloads | Memory/CPU impact | Expose `maxSize`, `sqlLimit`, threshold knobs globally and tune conservatively |
 | Confusion with app-side JDBC URL properties | Operational ambiguity | Document precedence and recommend OJP canonical keys as source of truth |
 | Unsupported key hard failure | Availability risk | Never fail bootstrap for unsupported key; skip with warning |
 
 ---
 
-## 10. Implementation Outline (For Future Coding Task)
+## 11. Implementation Outline (For Future Coding Task)
 
 This section describes what to implement later (not in this task):
 
@@ -199,7 +209,7 @@ This section describes what to implement later (not in this task):
 
 ---
 
-## 11. Recommended Default Profile
+## 12. Recommended Default Profile
 
 Use this as baseline:
 
@@ -215,12 +225,11 @@ XA baseline mirrors non-XA keys and values.
 
 ---
 
-## 12. Final Recommendation
+## 13. Final Recommendation
 
 Adopt a **canonical OJP statement-cache property layer** that is:
 
 - **default-enabled**
-- **datasource-scoped capable**
 - **database-portable at config level**
 - **translated server-side to concrete driver properties at runtime**
 
@@ -228,11 +237,10 @@ This gives users one stable OJP configuration model while preserving database-sp
 
 ---
 
-## 13. Confidence
+## 14. Confidence
 
 **Confidence: High (architecture fit), Medium (exact driver-key set by version).**
 
 Why:
 - High confidence on integration points and property model fit with existing OJP patterns.
 - Medium confidence on exact property names/behavior across all driver versions, which requires verification against each driver’s supported properties matrix during implementation/testing.
-

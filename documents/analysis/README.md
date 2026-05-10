@@ -17,8 +17,9 @@ This directory contains technical analysis documents for various OJP features an
   - Runtime translation model by database
   
 - **Full Analysis**: [PREPARED_STATEMENT_CACHE_SETTINGS_ANALYSIS.md](./PREPARED_STATEMENT_CACHE_SETTINGS_ANALYSIS.md)
-  - Detailed property model and override strategy
+  - Detailed property model (global server settings only)
   - Canonical-to-driver translation matrix
+  - Scope/units clarification for each setting
   - Validation, observability, risk assessment
   - Future implementation outline (design-only report)
 
