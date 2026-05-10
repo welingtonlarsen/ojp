@@ -48,6 +48,7 @@ This directory contains technical analysis documents for various OJP features an
 ### Pool Management
 
 - [POOL_DISABLE_FINAL_SUMMARY.md](./POOL_DISABLE_FINAL_SUMMARY.md) - Analysis of pool disable functionality
+- [ALWAYS_ON_ADMISSION_CONTROL_SEMAPHORE_ANALYSIS.md](./ALWAYS_ON_ADMISSION_CONTROL_SEMAPHORE_ANALYSIS.md) - Always-on semaphore admission control rationale and implementation notes
 
 ### Driver Architecture
 
@@ -94,5 +95,5 @@ When adding new analysis documents:
 
 ---
 
-**Last Updated:** 2026-01-08  
+**Last Updated:** 2026-05-10  
 **Maintained By:** OJP Core Team

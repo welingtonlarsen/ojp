@@ -36,8 +36,25 @@ class SlowQuerySegregationManagerTest {
         SlowQuerySegregationManager disabledManager = new SlowQuerySegregationManager(10, 20, 100, 5000, 1000, false);
 
         assertFalse(disabledManager.isEnabled());
+        assertFalse(disabledManager.isAdmissionControlOnly());
         assertNotNull(disabledManager.getPerformanceMonitor());
         assertNull(disabledManager.getSlotManager());
+    }
+
+    @Test
+    void testAdmissionControlOnlyMode() throws Exception {
+        SlowQuerySegregationManager admissionManager = new SlowQuerySegregationManager(5, 0, 0, 0, 1000, 0, true);
+
+        assertTrue(admissionManager.isEnabled());
+        assertTrue(admissionManager.isAdmissionControlOnly());
+        assertNotNull(admissionManager.getSlotManager());
+        assertEquals(0, admissionManager.getSlotManager().getSlowSlots());
+        assertEquals(5, admissionManager.getSlotManager().getFastSlots());
+
+        String result = admissionManager.executeWithSegregation("admission-op", () -> "ok");
+        assertEquals("ok", result);
+        assertEquals(0, admissionManager.getSlotManager().getActiveFastOperations());
+        assertTrue(admissionManager.getStatus().contains("admissionControlOnly=true"));
     }
 
     @Test

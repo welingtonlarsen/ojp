@@ -64,7 +64,8 @@ public class SlotManager {
         this.idleTimeoutMs = idleTimeoutMs;
 
         // Calculate slot allocation
-        this.slowSlots = Math.max(1, (totalSlots * slowSlotPercentage) / 100);
+        // slowSlotPercentage=0 is used by admission-control-only mode (all slots fast).
+        this.slowSlots = slowSlotPercentage == 0 ? 0 : Math.max(1, (totalSlots * slowSlotPercentage) / 100);
         this.fastSlots = totalSlots - this.slowSlots;
 
         // Initialize semaphores

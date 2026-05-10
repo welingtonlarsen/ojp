@@ -27,7 +27,15 @@ public class CreateSlowQuerySegregationManagerAction {
      * Create slow query segregation manager for non-XA datasource.
      */
     public void execute(ActionContext context, String connHash, int actualPoolSize) {
-        execute(context, connHash, actualPoolSize, false, 0);
+        execute(context, connHash, actualPoolSize,
+                context.getServerConfiguration().getSlowQueryFastSlotTimeout());
+    }
+
+    /**
+     * Create slow query segregation manager for non-XA datasource with explicit admission timeout.
+     */
+    public void execute(ActionContext context, String connHash, int actualPoolSize, long nonXaFastSlotTimeoutMillis) {
+        execute(context, connHash, actualPoolSize, false, nonXaFastSlotTimeoutMillis);
     }
 
     /**
@@ -37,9 +45,9 @@ public class CreateSlowQuerySegregationManagerAction {
      * @param connHash The connection hash
      * @param actualPoolSize The actual pool size (max XA transactions for XA, max pool size for non-XA)
      * @param isXA Whether this is an XA connection
-     * @param xaStartTimeoutMillis The XA start timeout in milliseconds (only used for XA connections)
+     * @param fastSlotTimeoutMillis The fast-slot timeout in milliseconds
      */
-    public void execute(ActionContext context, String connHash, int actualPoolSize, boolean isXA, long xaStartTimeoutMillis) {
+    public void execute(ActionContext context, String connHash, int actualPoolSize, boolean isXA, long fastSlotTimeoutMillis) {
         boolean slowQueryEnabled = context.getServerConfiguration().isSlowQuerySegregationEnabled();
 
         if (isXA) {
@@ -67,16 +75,16 @@ public class CreateSlowQuerySegregationManagerAction {
                     0, // slowSlotPercentage = 0 means all slots are fast
                     0, // idleTimeout not relevant
                     0, // slowSlotTimeout not relevant
-                    xaStartTimeoutMillis, // Use XA start timeout for fast slot timeout
+                    fastSlotTimeoutMillis, // Use XA start timeout for fast slot timeout
                     0, // updateGlobalAvgInterval = 0 means no performance monitoring
                     true // enabled = true to use SlotManager
                 );
                 context.getSlowQuerySegregationManagers().put(connHash, manager);
                 log.info("Created SlowQuerySegregationManager for XA datasource {} with {} slots (all fast, timeout={}ms, no performance monitoring)",
-                        connHash, actualPoolSize, xaStartTimeoutMillis);
+                        connHash, actualPoolSize, fastSlotTimeoutMillis);
             }
         } else {
-            // Non-XA handling (original logic)
+            // Non-XA handling
             if (slowQueryEnabled) {
                 SlowQuerySegregationManager manager = new SlowQuerySegregationManager(
                     actualPoolSize,
@@ -91,12 +99,19 @@ public class CreateSlowQuerySegregationManagerAction {
                 log.info("Created SlowQuerySegregationManager for datasource {} with pool size {}",
                         connHash, actualPoolSize);
             } else {
-                // Create disabled manager for consistency
+                // Create admission-control-only manager (always-on semaphore)
                 SlowQuerySegregationManager manager = new SlowQuerySegregationManager(
-                    1, 0, 0, 0, 0, 0, false
+                    actualPoolSize,
+                    0, // 0% slow slots => all slots used for admission control
+                    0,
+                    0,
+                    fastSlotTimeoutMillis,
+                    0,
+                    true
                 );
                 context.getSlowQuerySegregationManagers().put(connHash, manager);
-                log.info("Created disabled SlowQuerySegregationManager for datasource {}", connHash);
+                log.info("Created admission-control-only SlowQuerySegregationManager for datasource {} with pool size {} and timeout {}ms",
+                        connHash, actualPoolSize, fastSlotTimeoutMillis);
             }
         }
     }

@@ -41,10 +41,10 @@ class XaSlotManagementTest {
         final SlotManager slotManager = manager.getSlotManager();
         assertNotNull(slotManager);
         assertTrue(slotManager.isEnabled());
+        assertTrue(manager.isAdmissionControlOnly());
         assertEquals(5, slotManager.getTotalSlots());
-        // Note: SlotManager ensures min 1 slow slot, so with 5 total we get 1 slow + 4 fast
-        assertEquals(4, slotManager.getFastSlots());
-        assertEquals(1, slotManager.getSlowSlots());
+        assertEquals(5, slotManager.getFastSlots());
+        assertEquals(0, slotManager.getSlowSlots());
     }
 
     @Test
@@ -71,6 +71,7 @@ class XaSlotManagementTest {
         final SlotManager slotManager = manager.getSlotManager();
         assertNotNull(slotManager);
         assertTrue(slotManager.isEnabled());
+        assertFalse(manager.isAdmissionControlOnly());
         assertEquals(10, slotManager.getTotalSlots());
         assertEquals(7, slotManager.getFastSlots());
         assertEquals(3, slotManager.getSlowSlots());

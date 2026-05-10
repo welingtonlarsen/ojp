@@ -221,7 +221,8 @@ public class ConnectAction implements Action<ConnectionDetails, SessionInfo> {
                         context.getDatasourceMap().put(connHash, ds);
 
                         // Create a slow query segregation manager for this datasource
-                        CreateSlowQuerySegregationManagerAction.getInstance().execute(context, connHash, maxPoolSize);
+                        CreateSlowQuerySegregationManagerAction.getInstance()
+                                .execute(context, connHash, maxPoolSize, dsConfig.getConnectionTimeout());
 
                         log.info("Created new DataSource for dataSource '{}' with connHash: {} using provider: {}, maxPoolSize={}, minIdle={}",
                                 dsConfig.getDataSourceName(), connHash,

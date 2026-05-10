@@ -20,6 +20,7 @@ public class SlowQuerySegregationManager {
     private final QueryPerformanceMonitor performanceMonitor;
     private final SlotManager slotManager;
     private final boolean enabled;
+    private final boolean admissionControlOnly;
     private final long slowSlotTimeoutMs;
     private final long fastSlotTimeoutMs;
 
@@ -37,17 +38,19 @@ public class SlowQuerySegregationManager {
     public SlowQuerySegregationManager(int totalSlots, int slowSlotPercentage, long idleTimeoutMs,
                                      long slowSlotTimeoutMs, long fastSlotTimeoutMs, long updateGlobalAvgIntervalSeconds, boolean enabled) {
         this.enabled = enabled;
+        this.admissionControlOnly = enabled && slowSlotPercentage == 0;
         this.slowSlotTimeoutMs = slowSlotTimeoutMs;
         this.fastSlotTimeoutMs = fastSlotTimeoutMs;
         this.performanceMonitor = new QueryPerformanceMonitor(updateGlobalAvgIntervalSeconds);
 
         if (enabled) {
             this.slotManager = new SlotManager(totalSlots, slowSlotPercentage, idleTimeoutMs);
-            logger.info("SlowQuerySegregationManager initialized: enabled={}, totalSlots={}, slowSlotPercentage={}%, idleTimeout={}ms, slowSlotTimeout={}ms, fastSlotTimeout={}ms, updateGlobalAvgInterval={}s",
-                    enabled, totalSlots, slowSlotPercentage, idleTimeoutMs, slowSlotTimeoutMs, fastSlotTimeoutMs, updateGlobalAvgIntervalSeconds);
+            logger.info("SlowQuerySegregationManager initialized: enabled={}, admissionControlOnly={}, totalSlots={}, slowSlotPercentage={}%, idleTimeout={}ms, slowSlotTimeout={}ms, fastSlotTimeout={}ms, updateGlobalAvgInterval={}s",
+                    enabled, admissionControlOnly, totalSlots, slowSlotPercentage, idleTimeoutMs, slowSlotTimeoutMs, fastSlotTimeoutMs, updateGlobalAvgIntervalSeconds);
         } else {
             this.slotManager = null;
-            logger.info("SlowQuerySegregationManager initialized: enabled={}, updateGlobalAvgInterval={}s", enabled, updateGlobalAvgIntervalSeconds);
+            logger.info("SlowQuerySegregationManager initialized: enabled={}, admissionControlOnly={}, updateGlobalAvgInterval={}s",
+                    enabled, admissionControlOnly, updateGlobalAvgIntervalSeconds);
         }
     }
 
@@ -84,6 +87,23 @@ public class SlowQuerySegregationManager {
         if (!enabled) {
             // If segregation is disabled, just execute and monitor performance
             return executeAndMonitor(operationHash, sql, operation);
+        }
+
+        if (admissionControlOnly) {
+            boolean slotAcquired = false;
+            try {
+                slotAcquired = slotManager.acquireFastSlot(fastSlotTimeoutMs);
+                if (!slotAcquired) {
+                    throw new RuntimeException("Timeout waiting for admission control slot for operation: " + operationHash);
+                }
+                logger.debug("Acquired admission control slot for operation: {}", operationHash);
+                return executeAndMonitor(operationHash, sql, operation);
+            } finally {
+                if (slotAcquired) {
+                    slotManager.releaseFastSlot();
+                    logger.debug("Released admission control slot for operation: {}", operationHash);
+                }
+            }
         }
 
         // Determine if this is a slow or fast operation
@@ -170,7 +190,8 @@ public class SlowQuerySegregationManager {
         }
 
         return String.format(
-            "SlowQuerySegregationManager[enabled=true, trackedOps=%d, totalExecs=%d, overallAvg=%.2fms, %s]",
+            "SlowQuerySegregationManager[enabled=true, admissionControlOnly=%s, trackedOps=%d, totalExecs=%d, overallAvg=%.2fms, %s]",
+            admissionControlOnly,
             performanceMonitor.getTrackedOperationCount(),
             performanceMonitor.getTotalExecutionCount(),
             performanceMonitor.getOverallAverageExecutionTime(),
@@ -204,6 +225,13 @@ public class SlowQuerySegregationManager {
      */
     public boolean isEnabled() {
         return enabled;
+    }
+
+    /**
+     * Checks if manager is running in admission-control-only mode (no slow/fast segregation).
+     */
+    public boolean isAdmissionControlOnly() {
+        return admissionControlOnly;
     }
 
     /**
