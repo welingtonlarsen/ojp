@@ -93,6 +93,29 @@ public class ConnectionAcquisitionManager {
                 connectionHash, dataSource.getClass().getSimpleName());
         }
 
+        if (dataSource instanceof HikariDataSource) {
+            HikariDataSource hikariDataSource = (HikariDataSource) dataSource;
+            try {
+                int activeConnections = hikariDataSource.getHikariPoolMXBean().getActiveConnections();
+                int idleConnections = hikariDataSource.getHikariPoolMXBean().getIdleConnections();
+                int maxPoolSize = hikariDataSource.getMaximumPoolSize();
+                int waitingThreads = hikariDataSource.getHikariPoolMXBean().getThreadsAwaitingConnection();
+
+                if (idleConnections == 0 && activeConnections >= maxPoolSize) {
+                    String message = String.format(
+                            "Connection acquisition failed fast for hash: %s. Pool fully utilized - Active: %d, Max: %d, Waiting threads: %d",
+                            connectionHash, activeConnections, maxPoolSize, waitingThreads);
+                    poolMetrics.recordPoolExhaustion(poolName);
+                    log.error(message);
+                    throw new SQLException(message);
+                }
+            } catch (SQLException e) {
+                throw e;
+            } catch (Exception e) {
+                log.debug("Could not evaluate fail-fast pool state for hash: {}", connectionHash);
+            }
+        }
+
         long acquisitionStart = System.nanoTime();
         try {
             // Use pool's built-in connection timeout - this prevents indefinite blocking
