@@ -22,9 +22,11 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -119,13 +121,9 @@ class ResultSetHelperBlockSizeTest {
         when(conn.getMetaData()).thenReturn(dbMeta);
         when(dbMeta.getURL()).thenReturn(POSTGRES_URL);
 
-        // Simulate rowCount rows returned by next()
-        Boolean[] nextReturns = new Boolean[rowCount + 1];
-        for (int i = 0; i < rowCount; i++) {
-            nextReturns[i] = true;
-        }
-        nextReturns[rowCount] = false;
-        when(rs.next()).thenReturn(nextReturns[0], java.util.Arrays.copyOfRange(nextReturns, 1, nextReturns.length));
+        // Use a counter-based answer so next() correctly simulates rowCount rows then stops
+        AtomicInteger callCount = new AtomicInteger(0);
+        when(rs.next()).thenAnswer(inv -> callCount.getAndIncrement() < rowCount);
 
         when(rs.getObject(1)).thenReturn(42);
 
@@ -313,12 +311,13 @@ class ResultSetHelperBlockSizeTest {
 
         // First block carries column labels
         OpQueryResult firstBlock = ProtoConverter.fromProto(blocks.get(0).getQueryResult());
-        assertTrue(firstBlock.getLabels() != null && !firstBlock.getLabels().isEmpty());
+        assertNotNull(firstBlock.getLabels());
+        assertFalse(firstBlock.getLabels().isEmpty());
 
         // Subsequent blocks do not carry labels (builder is recreated each block)
         for (int i = 1; i < blocks.size(); i++) {
             OpQueryResult subsequentBlock = ProtoConverter.fromProto(blocks.get(i).getQueryResult());
-            assertTrue(subsequentBlock.getLabels() == null || subsequentBlock.getLabels().isEmpty(),
+            assertFalse(subsequentBlock.getLabels() != null && !subsequentBlock.getLabels().isEmpty(),
                     "Block " + i + " should not carry labels");
         }
     }

@@ -117,6 +117,8 @@ public class ResultSet extends RemoteProxyResultSet {
 
     private void setNextOpResult(OpResult result) {
         OpQueryResult opQueryResult = ProtoConverter.fromProto(result.getQueryResult());
+        // Accumulate the row count of the outgoing block before replacing it,
+        // so that getRow() can compute correct absolute row numbers for any block size.
         this.completedBlocksRowCount += this.currentDataBlock.size();
         this.currentDataBlock = opQueryResult.getRows();
         this.blockCount.incrementAndGet();
