@@ -310,6 +310,11 @@ public class AdmissionControlManager {
         T execute() throws Exception;
     }
 
+    /**
+     * Tracks slot ownership for the current thread while executing admission-controlled work.
+     * The {@code claimed} flag indicates the slot was transferred to session lifecycle ownership
+     * and must not be auto-released by executeWithSegregation.
+     */
     private static final class HeldSlot {
         private final boolean slow;
         private boolean claimed;
@@ -320,6 +325,11 @@ public class AdmissionControlManager {
         }
     }
 
+    /**
+     * Represents a claimed admission slot tied to session lifecycle.
+     * This permit must be released when the session terminates. Release is one-shot and
+     * idempotent, guarded by AtomicBoolean to prevent double-release across concurrent paths.
+     */
     public static final class SessionPermit {
         private final SlotManager slotManager;
         private final boolean slow;
