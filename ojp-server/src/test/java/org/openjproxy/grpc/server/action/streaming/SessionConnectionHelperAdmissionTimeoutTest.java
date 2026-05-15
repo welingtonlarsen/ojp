@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -160,7 +161,7 @@ class SessionConnectionHelperAdmissionTimeoutTest {
         try {
             assertTrue(finished, "Contender threads should complete");
             assertNull(unexpected.get(), "No unexpected thread failures should occur");
-            assertTrue(timedOutCount.get() == concurrentClients,
+            assertEquals(concurrentClients, timedOutCount.get(),
                     "All contenders should fail at connection admission while owner session holds permit");
             assertTrue(maxDurationMs.get() < 1500L,
                     "Maximum observed failure latency should stay close to admission timeout and not become additive");
