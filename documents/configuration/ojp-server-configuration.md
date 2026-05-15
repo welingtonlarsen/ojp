@@ -461,6 +461,7 @@ OJP uses a single timeout owner for pooled lazy session allocation: the admissio
 - `ojp.connection.pool.connectionTimeout` (non-XA) and `ojp.xa.connection.pool.connectionTimeout` (XA) define the admission wait budget.
 - Backend pool borrow is configured fail-fast after admission.
 - This prevents additive latency under contention (admission wait + pool borrow wait), and keeps timeout semantics consistent across XA, non-XA, and slow-query segregation paths.
+- With slow query segregation enabled, operations are still routed to fast/slow slot lanes for isolation, but pooled lazy session admission now uses the same single timeout budget model.
 
 ## Configuration Examples
 
