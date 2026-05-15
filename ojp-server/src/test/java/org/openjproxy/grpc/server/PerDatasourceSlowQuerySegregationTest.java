@@ -201,4 +201,69 @@ class PerDatasourceSlowQuerySegregationTest {
         assertNotNull(manager, "Should return fallback manager for non-existent connection hash");
         assertFalse(manager.isEnabled(), "Fallback manager should be disabled");
     }
+
+    @Test
+    void shouldUseConfiguredSlowQuerySlotTimeoutsWhenSegregationEnabled() throws Exception {
+        System.setProperty("ojp.server.slowQuerySegregation.enabled", "true");
+        System.setProperty("ojp.server.slowQuerySegregation.fastSlotTimeout", "9100");
+        System.setProperty("ojp.server.slowQuerySegregation.slowSlotTimeout", "17300");
+
+        try {
+            ServerConfiguration localConfig = new ServerConfiguration();
+            SessionManager localSessionManager = mock(SessionManager.class);
+            CircuitBreakerRegistry localCircuitBreakerRegistry = new CircuitBreakerRegistry(
+                    localConfig.getCircuitBreakerTimeout(),
+                    localConfig.getCircuitBreakerThreshold()
+            );
+            StatementServiceImpl localStatementService = new StatementServiceImpl(
+                    localSessionManager,
+                    localCircuitBreakerRegistry,
+                    localConfig,
+                    new java.util.concurrent.ConcurrentHashMap<>()
+            );
+
+            Properties clientProperties = new Properties();
+            clientProperties.setProperty("ojp.connection.pool.maximumPoolSize", "6");
+            clientProperties.setProperty("ojp.connection.pool.connectionTimeout", "250");
+
+            Map<String, Object> propertiesMap = new HashMap<>();
+            for (String key : clientProperties.stringPropertyNames()) {
+                propertiesMap.put(key, clientProperties.getProperty(key));
+            }
+
+            ConnectionDetails connectionDetails = ConnectionDetails.newBuilder()
+                    .setUrl("jdbc:h2:mem:test-timeout-precedence")
+                    .setUser("test")
+                    .setPassword("test")
+                    .setClientUUID("client-timeout-precedence")
+                    .addAllProperties(ProtoConverter.propertiesToProto(propertiesMap))
+                    .build();
+
+            StreamObserver<SessionInfo> responseObserver = Mockito.mock(StreamObserver.class);
+            localStatementService.connect(connectionDetails, responseObserver);
+
+            Field actionContextField = StatementServiceImpl.class.getDeclaredField("actionContext");
+            actionContextField.setAccessible(true);
+            ActionContext actionContext = (ActionContext) actionContextField.get(localStatementService);
+
+            String connHash = ConnectionHashGenerator.hashConnectionDetails(connectionDetails);
+            AdmissionControlManager manager = actionContext.getAdmissionControlManagers().get(connHash);
+
+            assertNotNull(manager, "Manager should exist for connected datasource");
+
+            Field fastTimeoutField = AdmissionControlManager.class.getDeclaredField("fastSlotTimeoutMs");
+            fastTimeoutField.setAccessible(true);
+            Field slowTimeoutField = AdmissionControlManager.class.getDeclaredField("slowSlotTimeoutMs");
+            slowTimeoutField.setAccessible(true);
+
+            long fastTimeout = (long) fastTimeoutField.get(manager);
+            long slowTimeout = (long) slowTimeoutField.get(manager);
+
+            assertEquals(9100L, fastTimeout, "Fast slot timeout should come from slow query segregation setting");
+            assertEquals(17300L, slowTimeout, "Slow slot timeout should come from slow query segregation setting");
+        } finally {
+            System.clearProperty("ojp.server.slowQuerySegregation.fastSlotTimeout");
+            System.clearProperty("ojp.server.slowQuerySegregation.slowSlotTimeout");
+        }
+    }
 }
