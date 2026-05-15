@@ -5,8 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.openjproxy.database.DatabaseUtils;
 import org.openjproxy.grpc.server.ConnectionAcquisitionManager;
+import org.openjproxy.grpc.server.ConnectionAdmissionManager;
 import org.openjproxy.grpc.server.ConnectionSessionDTO;
 import org.openjproxy.grpc.server.PoolNotFoundException;
+import org.openjproxy.grpc.server.Session;
 import org.openjproxy.grpc.server.UnpooledConnectionDetails;
 import org.openjproxy.grpc.server.action.ActionContext;
 
@@ -144,6 +146,7 @@ public class SessionConnectionHelper {
             } else {
                 // Regular connection - check if pooled or unpooled mode
                 UnpooledConnectionDetails unpooledDetails = context.getUnpooledConnectionDetailsMap().get(connHash);
+                boolean sessionCreated = false;
 
                 if (unpooledDetails != null) {
                     // Unpooled mode: create direct connection without pooling
@@ -169,11 +172,35 @@ public class SessionConnectionHelper {
                         throw new PoolNotFoundException(connHash);
                     }
 
+                    ConnectionAdmissionManager.ConnectionPermit connectionPermit = null;
                     try {
+                        ConnectionAdmissionManager connectionAdmissionManager =
+                                context.getConnectionAdmissionManagers().get(connHash);
+                        if (startSessionIfNone && connectionAdmissionManager != null) {
+                            connectionPermit = connectionAdmissionManager.acquirePermit(connHash);
+                        }
+
                         // Use enhanced connection acquisition with timeout protection
                         conn = ConnectionAcquisitionManager.acquireConnection(dataSource, connHash);
                         log.debug("Successfully acquired connection from pool for hash: {}", connHash);
+
+                        if (startSessionIfNone) {
+                            SessionInfo updatedSession = sessionManager.createSession(sessionInfo.getClientUUID(), conn);
+                            if (connectionPermit != null) {
+                                Session createdSession = sessionManager.getSession(updatedSession);
+                                if (createdSession != null) {
+                                    ConnectionAdmissionManager.ConnectionPermit permitForHook = connectionPermit;
+                                    createdSession.setConnectionPermitReleaseHook(permitForHook::release);
+                                    connectionPermit = null;
+                                }
+                            }
+                            dtoBuilder.session(updatedSession);
+                            sessionCreated = true;
+                        }
                     } catch (SQLException e) {
+                        if (connectionPermit != null) {
+                            connectionPermit.release();
+                        }
                         log.error("Failed to acquire connection from pool for hash: {}. Error: {}",
                                 connHash, e.getMessage());
 
@@ -182,7 +209,7 @@ public class SessionConnectionHelper {
                     }
                 }
 
-                if (startSessionIfNone) {
+                if (startSessionIfNone && !sessionCreated) {
                     SessionInfo updatedSession = sessionManager.createSession(sessionInfo.getClientUUID(), conn);
                     dtoBuilder.session(updatedSession);
                 }

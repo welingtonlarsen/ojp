@@ -47,6 +47,7 @@ class HandleUnpooledXAConnectionActionTest {
                 new ConcurrentHashMap<>(),
                 admissionControlManagers,
                 new ConcurrentHashMap<>(),
+                new ConcurrentHashMap<>(),
                 mock(XAConnectionPoolProvider.class),
                 new MultinodeXaCoordinator(),
                 new ClusterHealthTracker(),

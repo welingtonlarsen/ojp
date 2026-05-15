@@ -81,6 +81,7 @@ class ResultSetHelperBlockSizeTest {
                 new java.util.concurrent.ConcurrentHashMap<>(),
                 new java.util.concurrent.ConcurrentHashMap<>(),
                 new java.util.concurrent.ConcurrentHashMap<>(),
+                new java.util.concurrent.ConcurrentHashMap<>(),
                 null,
                 null,
                 null,
