@@ -35,7 +35,8 @@ public class ServerConfiguration {
     private static final String SLOW_QUERY_SLOW_SLOT_TIMEOUT_KEY = "ojp.server.slowQuerySegregation.slowSlotTimeout";
     private static final String SLOW_QUERY_FAST_SLOT_TIMEOUT_KEY = "ojp.server.slowQuerySegregation.fastSlotTimeout";
     private static final String SLOW_QUERY_UPDATE_GLOBAL_AVG_INTERVAL_KEY = "ojp.server.slowQuerySegregation.updateGlobalAvgInterval";
-    private static final String SLOW_QUERY_MAX_QUEUE_DEPTH_KEY = "ojp.server.slowQuerySegregation.maxQueueDepth";
+    private static final String ADMISSION_CONTROL_MAX_QUEUE_DEPTH_KEY = "ojp.server.admissionControl.maxQueueDepth";
+    private static final String LEGACY_SLOW_QUERY_MAX_QUEUE_DEPTH_KEY = "ojp.server.slowQuerySegregation.maxQueueDepth";
     private static final String MAX_CONCURRENT_REQUESTS_KEY = "ojp.server.maxConcurrentRequests";
     private static final String DRIVERS_PATH_KEY = "ojp.libs.path";
     private static final String SQL_ENHANCER_ENABLED_KEY = "ojp.sql.enhancer.enabled";
@@ -115,7 +116,7 @@ public class ServerConfiguration {
     public static final long DEFAULT_SLOW_QUERY_SLOW_SLOT_TIMEOUT = 120000; // 120 seconds slow slot timeout
     public static final long DEFAULT_SLOW_QUERY_FAST_SLOT_TIMEOUT = 60000; // 60 seconds fast slot timeout
     public static final long DEFAULT_SLOW_QUERY_UPDATE_GLOBAL_AVG_INTERVAL = 300; // 300 seconds (5 minutes) global average update interval
-    public static final int DEFAULT_SLOW_QUERY_MAX_QUEUE_DEPTH = 0; // 0 means auto-calculate from total slots
+    public static final int DEFAULT_ADMISSION_CONTROL_MAX_QUEUE_DEPTH = 0; // 0 means auto-calculate from total slots
     public static final int DEFAULT_MAX_CONCURRENT_REQUESTS = 200;
     public static final String DEFAULT_DRIVERS_PATH = "./ojp-libs"; // Default external libraries directory path
 
@@ -196,7 +197,7 @@ public class ServerConfiguration {
     private final long slowQuerySlowSlotTimeout;
     private final long slowQueryFastSlotTimeout;
     private final long slowQueryUpdateGlobalAvgInterval;
-    private final int slowQueryMaxQueueDepth;
+    private final int admissionControlMaxQueueDepth;
     private final int maxConcurrentRequests;
     private final String driversPath;
     private final boolean sqlEnhancerEnabled;
@@ -277,7 +278,8 @@ public class ServerConfiguration {
         this.slowQuerySlowSlotTimeout = getLongProperty(SLOW_QUERY_SLOW_SLOT_TIMEOUT_KEY, DEFAULT_SLOW_QUERY_SLOW_SLOT_TIMEOUT);
         this.slowQueryFastSlotTimeout = getLongProperty(SLOW_QUERY_FAST_SLOT_TIMEOUT_KEY, DEFAULT_SLOW_QUERY_FAST_SLOT_TIMEOUT);
         this.slowQueryUpdateGlobalAvgInterval = getLongProperty(SLOW_QUERY_UPDATE_GLOBAL_AVG_INTERVAL_KEY, DEFAULT_SLOW_QUERY_UPDATE_GLOBAL_AVG_INTERVAL);
-        this.slowQueryMaxQueueDepth = getNonNegativeIntProperty(SLOW_QUERY_MAX_QUEUE_DEPTH_KEY, DEFAULT_SLOW_QUERY_MAX_QUEUE_DEPTH);
+        this.admissionControlMaxQueueDepth = getNonNegativeIntProperty(ADMISSION_CONTROL_MAX_QUEUE_DEPTH_KEY,
+                getNonNegativeIntProperty(LEGACY_SLOW_QUERY_MAX_QUEUE_DEPTH_KEY, DEFAULT_ADMISSION_CONTROL_MAX_QUEUE_DEPTH));
         this.maxConcurrentRequests = getNonNegativeIntProperty(MAX_CONCURRENT_REQUESTS_KEY, DEFAULT_MAX_CONCURRENT_REQUESTS);
         this.driversPath = getStringProperty(DRIVERS_PATH_KEY, DEFAULT_DRIVERS_PATH);
         this.sqlEnhancerEnabled = getBooleanProperty(SQL_ENHANCER_ENABLED_KEY, DEFAULT_SQL_ENHANCER_ENABLED);
@@ -474,7 +476,7 @@ public class ServerConfiguration {
         logger.info("  Slow Query Slow Slot Timeout: {} ms", slowQuerySlowSlotTimeout);
         logger.info("  Slow Query Fast Slot Timeout: {} ms", slowQueryFastSlotTimeout);
         logger.info("  Slow Query Update Global Avg Interval: {} seconds", slowQueryUpdateGlobalAvgInterval);
-        logger.info("  Slow Query Max Queue Depth: {} (0 means auto)", slowQueryMaxQueueDepth);
+        logger.info("  Admission Control Max Queue Depth: {} (0 means auto)", admissionControlMaxQueueDepth);
         logger.info("  Max Concurrent Requests: {} (0 means unlimited)", maxConcurrentRequests);
         logger.info("  External Libraries Path: {}", driversPath);
         logger.info("  SQL Enhancer Enabled: {}", sqlEnhancerEnabled);
@@ -615,8 +617,16 @@ public class ServerConfiguration {
         return slowQueryUpdateGlobalAvgInterval;
     }
 
+    public int getAdmissionControlMaxQueueDepth() {
+        return admissionControlMaxQueueDepth;
+    }
+
+    /**
+     * @deprecated Use {@link #getAdmissionControlMaxQueueDepth()} instead.
+     */
+    @Deprecated(since = "0.4.16", forRemoval = false)
     public int getSlowQueryMaxQueueDepth() {
-        return slowQueryMaxQueueDepth;
+        return getAdmissionControlMaxQueueDepth();
     }
 
     public int getMaxConcurrentRequests() {

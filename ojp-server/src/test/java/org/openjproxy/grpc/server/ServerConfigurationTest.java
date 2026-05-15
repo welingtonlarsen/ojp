@@ -30,6 +30,7 @@ class ServerConfigurationTest {
         System.clearProperty("ojp.prometheus.allowedIps");
         System.clearProperty("ojp.server.circuitBreakerTimeout");
         System.clearProperty("ojp.server.maxConcurrentRequests");
+        System.clearProperty("ojp.server.admissionControl.maxQueueDepth");
         System.clearProperty("ojp.server.slowQuerySegregation.maxQueueDepth");
         System.clearProperty("ojp.libs.path");
         System.clearProperty("ojp.resultset.rowsPerBlock");
@@ -53,7 +54,7 @@ class ServerConfigurationTest {
         assertEquals(ServerConfiguration.DEFAULT_PROMETHEUS_ALLOWED_IPS, config.getPrometheusAllowedIps());
         assertEquals(ServerConfiguration.DEFAULT_CIRCUIT_BREAKER_TIMEOUT, config.getCircuitBreakerTimeout());
         assertEquals(ServerConfiguration.DEFAULT_MAX_CONCURRENT_REQUESTS, config.getMaxConcurrentRequests());
-        assertEquals(ServerConfiguration.DEFAULT_SLOW_QUERY_MAX_QUEUE_DEPTH, config.getSlowQueryMaxQueueDepth());
+        assertEquals(ServerConfiguration.DEFAULT_ADMISSION_CONTROL_MAX_QUEUE_DEPTH, config.getAdmissionControlMaxQueueDepth());
         assertEquals(ServerConfiguration.DEFAULT_CIRCUIT_BREAKER_THRESHOLD, config.getCircuitBreakerThreshold());
         assertEquals(ServerConfiguration.DEFAULT_DRIVERS_PATH, config.getDriversPath());
         assertTrue(config.isStatementCacheEnabled());
@@ -84,7 +85,7 @@ class ServerConfigurationTest {
         System.setProperty("ojp.prometheus.allowedIps", "127.0.0.1,192.168.1.0/24");
         System.setProperty("ojp.server.circuitBreakerTimeout", "120000");
         System.setProperty("ojp.server.maxConcurrentRequests", "123");
-        System.setProperty("ojp.server.slowQuerySegregation.maxQueueDepth", "77");
+        System.setProperty("ojp.server.admissionControl.maxQueueDepth", "77");
 
         ServerConfiguration config = new ServerConfiguration();
 
@@ -101,7 +102,16 @@ class ServerConfigurationTest {
         assertEquals(List.of("127.0.0.1", "192.168.1.0/24"), config.getPrometheusAllowedIps());
         assertEquals(120000, config.getCircuitBreakerTimeout());
         assertEquals(123, config.getMaxConcurrentRequests());
-        assertEquals(77, config.getSlowQueryMaxQueueDepth());
+        assertEquals(77, config.getAdmissionControlMaxQueueDepth());
+    }
+
+    @Test
+    void testLegacySlowQueryQueueDepthPropertyFallback() {
+        System.setProperty("ojp.server.slowQuerySegregation.maxQueueDepth", "88");
+
+        ServerConfiguration config = new ServerConfiguration();
+
+        assertEquals(88, config.getAdmissionControlMaxQueueDepth());
     }
 
     @Test
@@ -110,7 +120,7 @@ class ServerConfigurationTest {
         System.setProperty("ojp.prometheus.port", "not-a-number");
         System.setProperty("ojp.server.threadPoolSize", "abc");
         System.setProperty("ojp.server.maxConcurrentRequests", "-2");
-        System.setProperty("ojp.server.slowQuerySegregation.maxQueueDepth", "-3");
+        System.setProperty("ojp.server.admissionControl.maxQueueDepth", "-3");
         System.setProperty("ojp.server.circuitBreakerThreshold", "xyz");
         System.setProperty("ojp.connection.pool.statementCache.maxSize", "-1");
         System.setProperty("ojp.connection.pool.statementCache.sqlLimit", "invalid");
@@ -123,7 +133,7 @@ class ServerConfigurationTest {
         assertEquals(ServerConfiguration.DEFAULT_PROMETHEUS_PORT, config.getPrometheusPort());
         assertEquals(ServerConfiguration.DEFAULT_THREAD_POOL_SIZE, config.getThreadPoolSize());
         assertEquals(ServerConfiguration.DEFAULT_MAX_CONCURRENT_REQUESTS, config.getMaxConcurrentRequests());
-        assertEquals(ServerConfiguration.DEFAULT_SLOW_QUERY_MAX_QUEUE_DEPTH, config.getSlowQueryMaxQueueDepth());
+        assertEquals(ServerConfiguration.DEFAULT_ADMISSION_CONTROL_MAX_QUEUE_DEPTH, config.getAdmissionControlMaxQueueDepth());
         assertEquals(ServerConfiguration.DEFAULT_CIRCUIT_BREAKER_THRESHOLD, config.getCircuitBreakerThreshold());
         assertEquals(ServerConfiguration.DEFAULT_STATEMENT_CACHE_MAX_SIZE, config.getStatementCacheMaxSize());
         assertEquals(ServerConfiguration.DEFAULT_STATEMENT_CACHE_SQL_LIMIT, config.getStatementCacheSqlLimit());
