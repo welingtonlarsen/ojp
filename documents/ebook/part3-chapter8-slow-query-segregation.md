@@ -175,7 +175,9 @@ If your application has many legitimate slow operations (like scheduled reports)
 
 ### Timeout Configuration
 
-Historically, two timeout settings were used to tune fast and slow lane waits separately. In the current pooled lazy session admission model, timeout ownership is unified under datasource `connectionTimeout` (and XA equivalent), with backend borrow fail-fast. The keys below remain accepted as legacy settings, but they no longer override the pooled lazy admission timeout budget.
+Historically, two timeout settings were used to tune fast and slow lane waits separately.
+In the current pooled lazy session admission model, timeout ownership is unified under datasource `connectionTimeout` (and XA equivalent), with backend borrow fail-fast.
+The keys below remain accepted as legacy settings, but they no longer override the pooled lazy admission timeout budget.
 
 ```properties
 # Timeout for acquiring a slow operation slot (milliseconds)
@@ -187,7 +189,7 @@ ojp.server.slowQuerySegregation.fastSlotTimeout=60000
 
 If an admission timeout occurs, the client receives an exception indicating that no slot was available within the configured admission timeout window.
 
-For current releases, tune `ojp.connection.pool.connectionTimeout` and `ojp.xa.connection.pool.connectionTimeout` for timeout behavior.
+For current releases, tune `ojp.connection.pool.connectionTimeout` and `ojp.xa.connection.pool.connectionTimeout` to control the admission wait budget.
 
 ### Idle Timeout for Borrowing
 
