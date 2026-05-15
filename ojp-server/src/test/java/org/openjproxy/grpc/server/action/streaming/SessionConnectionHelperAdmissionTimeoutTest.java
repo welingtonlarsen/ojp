@@ -43,6 +43,9 @@ import static org.mockito.Mockito.mock;
 
 class SessionConnectionHelperAdmissionTimeoutTest {
 
+    private static final long ADMISSION_TIMEOUT_MS = 300L;
+    private static final long ADMISSION_TIMEOUT_SAFETY_MARGIN_MS = 1200L;
+
     private ActionContext buildContext() {
         ServerConfiguration serverConfiguration = new ServerConfiguration();
         SessionManager sessionManager = new SessionManagerImpl(new ConcurrentHashMap<>());
@@ -85,7 +88,7 @@ class SessionConnectionHelperAdmissionTimeoutTest {
         Properties properties = new Properties();
         properties.setProperty("ojp.connection.pool.maximumPoolSize", "1");
         properties.setProperty("ojp.connection.pool.minimumIdle", "0");
-        properties.setProperty("ojp.connection.pool.connectionTimeout", "300");
+        properties.setProperty("ojp.connection.pool.connectionTimeout", String.valueOf(ADMISSION_TIMEOUT_MS));
 
         Map<String, Object> propertyMap = new HashMap<>();
         for (String key : properties.stringPropertyNames()) {
@@ -163,7 +166,7 @@ class SessionConnectionHelperAdmissionTimeoutTest {
             assertNull(unexpected.get(), "No unexpected thread failures should occur");
             assertEquals(concurrentClients, timedOutCount.get(),
                     "All contenders should fail at connection admission while owner session holds permit");
-            assertTrue(maxDurationMs.get() < 1500L,
+            assertTrue(maxDurationMs.get() < ADMISSION_TIMEOUT_MS + ADMISSION_TIMEOUT_SAFETY_MARGIN_MS,
                     "Maximum observed failure latency should stay close to admission timeout and not become additive");
             assertTrue(errorMessages.stream().allMatch(message -> message != null && message.contains("phase=admission")),
                     "Failures should be attributed to admission timeout phase");

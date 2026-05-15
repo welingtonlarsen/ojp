@@ -115,7 +115,7 @@ public class ConnectionAcquisitionManager {
                 throw e;
             } catch (Exception e) {
                 String message = String.format(
-                        "Cannot evaluate fail-fast pool state for hash: %s (phase=pool_precheck). Refusing pool borrow to avoid hidden blocking path.",
+                        "Cannot evaluate pool state for hash: %s (phase=pool_precheck). Refusing borrow attempt due to pre-check failure to avoid hidden blocking path.",
                         connectionHash);
                 log.error(message, e);
                 throw new SQLException(message, e);

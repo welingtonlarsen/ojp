@@ -14,11 +14,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class ConnectionAdmissionManager {
 
+    private final int totalPermits;
     private final Semaphore connectionSlots;
     private final long timeoutMs;
 
     public ConnectionAdmissionManager(int totalSlots, long timeoutMs) {
-        this.connectionSlots = new Semaphore(Math.max(totalSlots, 1), true);
+        this.totalPermits = Math.max(totalSlots, 1);
+        this.connectionSlots = new Semaphore(totalPermits, true);
         this.timeoutMs = timeoutMs;
     }
 
@@ -26,9 +28,10 @@ public class ConnectionAdmissionManager {
         try {
             boolean acquired = connectionSlots.tryAcquire(timeoutMs, TimeUnit.MILLISECONDS);
             if (!acquired) {
+                int availablePermits = connectionSlots.availablePermits();
                 throw new SQLException(String.format(
-                        "Connection admission timeout for hash: %s after %dms (phase=admission, availablePermits=%d)",
-                        connHash, timeoutMs, connectionSlots.availablePermits()));
+                        "Connection admission timeout for hash: %s after %dms (phase=admission, totalPermits=%d, currentHolders=%d)",
+                        connHash, timeoutMs, totalPermits, totalPermits - availablePermits));
             }
             return new ConnectionPermit(connectionSlots);
         } catch (InterruptedException e) {

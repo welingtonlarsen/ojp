@@ -192,6 +192,9 @@ public class SessionConnectionHelper {
                                     ConnectionAdmissionManager.ConnectionPermit permitForHook = connectionPermit;
                                     createdSession.setConnectionPermitReleaseHook(permitForHook::release);
                                     connectionPermit = null;
+                                } else {
+                                    connectionPermit.release();
+                                    connectionPermit = null;
                                 }
                             }
                             dtoBuilder.session(updatedSession);
