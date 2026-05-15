@@ -61,6 +61,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     admissionTimeoutMillis,
                     admissionTimeoutMillis,
                     context.getServerConfiguration().getSlowQueryUpdateGlobalAvgInterval(),
+                    context.getServerConfiguration().getSlowQueryMaxQueueDepth(),
                     true
                 );
                 context.getAdmissionControlManagers().put(connHash, manager);
@@ -77,6 +78,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     0, // slowSlotTimeout not relevant
                     admissionTimeoutMillis, // Use configured admission timeout for fast slot timeout
                     0, // updateGlobalAvgInterval = 0 means no performance monitoring
+                    context.getServerConfiguration().getSlowQueryMaxQueueDepth(),
                     true // enabled = true to use SlotManager
                 );
                 context.getAdmissionControlManagers().put(connHash, manager);
@@ -93,6 +95,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     admissionTimeoutMillis,
                     admissionTimeoutMillis,
                     context.getServerConfiguration().getSlowQueryUpdateGlobalAvgInterval(),
+                    context.getServerConfiguration().getSlowQueryMaxQueueDepth(),
                     true
                 );
                 context.getAdmissionControlManagers().put(connHash, manager);
@@ -107,6 +110,7 @@ public class CreateSlowQuerySegregationManagerAction {
                     0,
                     admissionTimeoutMillis,
                     0,
+                    context.getServerConfiguration().getSlowQueryMaxQueueDepth(),
                     true
                 );
                 context.getAdmissionControlManagers().put(connHash, manager);

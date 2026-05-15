@@ -45,6 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
         // Test invalid timeout
         assertThrows(IllegalArgumentException.class, () -> new SlotManager(10, 20, -1));
+        assertThrows(IllegalArgumentException.class, () -> new SlotManager(10, 20, 100, -1));
     }
 
     @Test
@@ -188,6 +189,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         assertTrue(status.contains("slow=0/2"));
         assertTrue(status.contains("fast=0/8"));
         assertTrue(status.contains("enabled=true"));
+    }
+
+    @Test
+    void testQueueDepthLimitFailsFastForWaitingRequests() throws InterruptedException {
+        SlotManager singleSlotManager = new SlotManager(1, 0, 100, 0);
+        assertEquals(2, singleSlotManager.getMaxWaitQueueDepth());
+        assertTrue(singleSlotManager.acquireFastSlot(1000));
+
+        Thread[] waitingThreads = new Thread[2];
+        for (int i = 0; i < waitingThreads.length; i++) {
+            waitingThreads[i] = new Thread(() -> {
+                try {
+                    singleSlotManager.acquireFastSlot(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            waitingThreads[i].start();
+        }
+
+        Thread.sleep(100); //NOSONAR
+
+        assertFalse(singleSlotManager.acquireFastSlot(1000));
+
+        singleSlotManager.releaseFastSlot();
+        for (Thread waitingThread : waitingThreads) {
+            waitingThread.join();
+        }
     }
 
     @Test
