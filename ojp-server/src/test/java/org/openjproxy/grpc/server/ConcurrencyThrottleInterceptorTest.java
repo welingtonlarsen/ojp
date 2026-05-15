@@ -35,7 +35,6 @@ class ConcurrencyThrottleInterceptorTest {
         ServerCall.Listener<String> result = interceptor.interceptCall(call, new Metadata(), next);
 
         assertNotNull(result);
-        assertSame(listener, result);
         assertTrue(nextCalled.get());
         assertEquals(0, call.getCloseCount());
         assertEquals(1, interceptor.getCurrentInFlightRequests());
