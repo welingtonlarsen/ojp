@@ -330,18 +330,24 @@ message SessionInfo {
 }
 ```
 
-The driver uses these to calculate and enforce a local concurrency semaphore:
+The driver uses these to calculate and enforce a local concurrency limiter:
 
 ```
-perClientLimit = (maxAdmission / clientCount) * numOjpServers
+perClientLimit = ceil(maxAdmission / clientCount) * numOjpServers * 0.9
 ```
 
-Where `numOjpServers` is the number of UP nodes the driver knows about (already
-available from the `clusterHealth` field of `SessionInfo`).
+Where:
+- `maxAdmission` is the **per-node** admission slot budget (= HikariCP pool size on that node)
+- `clientCount` is the number of distinct JVM processes (`clientUUID`) connected to this
+  `connHash` on this node
+- `numOjpServers` is the number of UP nodes (derived from the `clusterHealth` field)
+- `0.9` is the 10% safety headroom to absorb stale `clientCount`
 
 **Example:**
-- `maxAdmission = 20`, `clientCount = 4`, `numOjpServers = 1` → limit = **5** per client
-- `maxAdmission = 20`, `clientCount = 4`, `numOjpServers = 3` → limit = **15** per client
+- `maxAdmission = 20` (per-node pool size), `clientCount = 4`, `numOjpServers = 1`
+  → rawLimit = `ceil(20/4) * 1 = 5` → with headroom: **4** per client
+- `maxAdmission = 20`, `clientCount = 4`, `numOjpServers = 3`
+  → rawLimit = `ceil(20/4) * 3 = 15` → with headroom: **13** per client
 
 ---
 
@@ -398,18 +404,42 @@ remainder-distributed approach).
 The driver must handle the case where no other clients are connected.
 The safe fallback is `perClientLimit = maxAdmission * numOjpServers`.
 
-**4. `maxAdmission` definition is ambiguous in multinode**
-Does `maxAdmission` refer to the per-node slot count, or to the aggregate cluster
-capacity? If it is per-node, the formula already multiplies by `numOjpServers`,
-so the semantics must be documented clearly. If it is aggregate, the multiplication
-must not happen.
+**4. `maxAdmission` is per-node — confirmed by server code**
+`totalSlots` in `SlotManager` is set to `actualPoolSize`, which is the HikariCP connection pool
+size configured on **this specific OJP node** (`CreateSlowQuerySegregationManagerAction`).
+Each node tracks only its own pool. `maxAdmission` is therefore per-node, not cluster-aggregate.
+The formula `(maxAdmission / clientCount) * numOjpServers` is correct: it multiplies the
+per-node budget by the number of UP nodes to derive the total cluster budget available to
+one client. This must be clearly documented in the proto field comment.
 
-**5. Semaphore resizing is non-trivial**
+**5. Resizing a concurrency limiter — and a cheaper alternative**
 `java.util.concurrent.Semaphore` does not support changing its permit count directly.
-When the driver receives a new `clientCount`, it must drain excess permits or inject
-new ones safely. A common pattern is to track `currentLimit` separately and
-release/acquire the delta atomically. This requires careful implementation to avoid
-races.
+However, if the driver uses **fail-fast** (non-blocking) concurrency control — which is
+the right choice here, since blocking adds latency to every successful request — a plain
+`AtomicInteger` counter is sufficient and trivially resizable:
+
+```java
+// Per-connHash state stored in the driver
+AtomicInteger inFlight = new AtomicInteger(0);
+volatile int limit;          // updated when SessionInfo delivers new values
+
+// Acquire (non-blocking, fail-fast):
+if (inFlight.incrementAndGet() > limit) {
+    inFlight.decrementAndGet();
+    throw new SQLException("Client throttle limit exceeded for datasource: " + connHash);
+}
+
+// Release (always in finally):
+inFlight.decrementAndGet();
+
+// Resize (on every SessionInfo response):
+limit = newLimit;            // single volatile write, no locks needed
+```
+
+This is **zero-overhead on the happy path** (one atomic increment, one integer comparison)
+and resizing is a single volatile write. No drain/inject logic, no races, no lock contention.
+The tradeoff is that over-limit requests fail immediately rather than queuing — which is the
+desired fail-fast behaviour for a client-side overload guard.
 
 **6. All threads in one JVM share the same limit**
 If a single JVM has 50 threads all using the same datasource, the per-JVM semaphore
@@ -423,22 +453,43 @@ remaining client gets a suddenly larger budget. All of them may burst to fill th
 new limit simultaneously, potentially spiking the server back into overload. A step
 limit on permit increases (AIMD-style increase cap) would mitigate this.
 
-**8. Cross-node `clientCount` requires coordination**
-In a multi-node OJP cluster, each node sees only the clients connected to it. To
-compute a globally accurate `clientCount`, nodes must either gossip counts or share
-state. Without this, each node underestimates the total client count and each driver
-receives an inflated per-client limit. The product of inflated limits across all
-clients can exceed `maxAdmission`.
+**8. Cross-node `clientCount` — plain-language explanation with example**
+
+In a 2-node OJP cluster, clients can connect to different nodes:
+
+```
+App1 → OJP Node A  (Node A sees: App1 only → clientCount = 1)
+App2 → OJP Node B  (Node B sees: App2 only → clientCount = 1)
+```
+
+Node A tells App1: `clientCount = 1, maxAdmission = 10, numOjpServers = 2`
+→ App1 calculates: `(10 / 1) * 2 = 20` permits.
+
+Node B tells App2: `clientCount = 1, maxAdmission = 10, numOjpServers = 2`
+→ App2 calculates: `(10 / 1) * 2 = 20` permits.
+
+But each node can only handle 10 concurrent requests. App1 hits Node A with up to 20,
+App2 hits Node B with up to 20 — a total of 40 in-flight against a real cluster capacity
+of 20. Both nodes overload.
+
+**Root cause:** Each node sees only its own connected clients, so it underestimates
+`clientCount` and each client gets an over-inflated limit.
+
+**Safe v1 approach (S6):** Accept the per-node snapshot. In the steady state for multinode,
+clients spread across nodes. The formula slightly over-throttles when clients unevenly
+concentrate on one node, but the server's own admission control (`SlotManager`) remains
+the final safety gate regardless. A future version can add cluster-aggregate counts via
+cross-node state sharing.
 
 ---
 
 ### Concerns
 
-**C1 — What counts as a "client" for `clientCount`?**
-Is it unique `clientUUID` values (JVM processes), unique active sessions, or unique
-active connections? For the formula to be correct, it should count distinct JVM
-processes (by `clientUUID`), not raw connection count, because one JVM may have
-many connections all sharing the same semaphore.
+**C1 — Resolved: `clientCount` counts distinct `clientUUID` values per `connHash`**
+`clientUUID` is a static UUID per JVM process (see `ClientUUID.java`). One JVM running
+a 50-connection pool has exactly one `clientUUID`. Counting `clientUUID` values per
+`connHash` ensures the formula reflects the number of distinct application processes,
+not connections. A single JVM with 50 connections counts as 1 client.
 
 **C2 — Update frequency and oscillation**
 `SessionInfo` is returned on every operation. If `clientCount` changes on every
@@ -457,21 +508,59 @@ reactively after the first rejection.
 explaining the scope: per-node vs cluster-aggregate, per-clientUUID vs per-session,
 and what `0` means (field not set → no limit).
 
-**C5 — Interaction with in-flight transactions**
-Same concern as the purely reactive approach: mid-transaction statements must be
-exempt from the local semaphore or they risk deadlocking against the semaphore while
-the server holds a session lock waiting for commit/rollback.
+**C5 — In-transaction bypass — plain-language explanation with example**
+
+Without a bypass, a mid-transaction thread can block itself via the client semaphore:
+
+1. Thread A sends `BEGIN` (or first statement with `autoCommit = false`). The server
+   creates a session and holds a real database connection for Thread A.
+2. Other threads (B–Z) are running queries. The client semaphore fills to its limit.
+3. Thread A now sends `INSERT INTO orders VALUES (...)` — the next statement in its
+   open transaction.
+4. The client semaphore is full → Thread A is blocked waiting for a permit.
+5. Thread B–Z are also holding their permits, waiting for server responses. Nobody
+   finishes quickly; nobody releases.
+6. Meanwhile the server's transaction timeout fires. The server rolls back Thread A's
+   transaction and releases its database connection.
+7. Thread A eventually gets a permit (or times out in the queue), sends the INSERT,
+   and receives a "session not found" or "transaction already rolled back" error.
+
+**This is a deadlock-by-timeout:** the client queue blocks the thread that should be
+completing an open server-side transaction, while the server's clock runs out.
+
+**Fix:** When a `Connection` has `autoCommit = false`, subsequent statements on that
+connection must bypass the client semaphore and go directly to the server. The semaphore
+controls admission for *new requests* only — not continuation of an already-admitted,
+already-open transaction. Track `autoCommit` state in the driver's `OjpConnection` and
+skip the `inFlight` check when `autoCommit == false`.
 
 ---
 
 ### Suggestions
 
-**S1 — Use ceiling division and add a safety buffer**
+**S1 — Use ceiling division with a 10% safety headroom**
+
+**Why ceiling division, not floor:**
+Floor division permanently wastes capacity. With `maxAdmission = 20` and `clientCount = 7`,
+`floor(20/7) = 2` per client. Total allocated = `2 × 7 = 14`. Six slots on the server sit
+idle even when clients have work to do. With many clients this waste compounds.
+
+Ceiling division gives `ceil(20/7) = 3`. Total allocated = `3 × 7 = 21` — slightly over
+the server capacity, which is why the safety headroom is needed.
+
+**Why 10% safety headroom:**
+`clientCount` is always slightly stale (it was accurate when the server built the response,
+not when the driver reads it). If one new client joined since the last response, the true
+`clientCount` is `clientCount + 1`. Ceiling division without headroom could briefly allow
+`clientCount + 1` clients each holding `ceil(20/7) = 3` permits = 24 in-flight against a
+server capacity of 20. The 10% reduction absorbs one stale-count error at typical client
+counts, without meaningfully reducing steady-state throughput.
+
 ```java
+// clientCount > 0 is guaranteed by the caller (see C1 for division-by-zero handling)
 int rawLimit = (int) Math.ceil((double) maxAdmission / clientCount) * numOjpServers;
-int limit = Math.max(1, (int)(rawLimit * 0.9)); // 10% safety headroom
+int limit = Math.max(1, (int)(rawLimit * 0.9)); // 10% safety headroom, minimum 1
 ```
-The 10% headroom prevents over-allocation due to stale `clientCount`.
 
 **S2 — Derive `numOjpServers` from `clusterHealth`**
 The `clusterHealth` field already encodes `"host1:port1(UP);host2:port2(DOWN);..."`.
@@ -483,10 +572,38 @@ Servers that have not configured admission control set `maxAdmission = 0`.
 The driver should treat this as "no client-side throttle."
 This preserves backward compatibility and makes opt-out trivial.
 
-**S4 — Apply a step limit when increasing the semaphore**
-When `clientCount` drops and the limit should increase, apply a cap:
-increase by at most `X%` per `SessionInfo` update to avoid thundering-herd
-burst. When the limit should decrease, apply immediately.
+**S4 — AIMD-style step-limited increase when the limit grows**
+
+**Why a step limit on increase:**
+When several clients disconnect simultaneously, `clientCount` drops sharply. Every remaining
+client immediately recomputes a much larger limit and bursts to fill it.
+
+Example: 8 clients, `maxAdmission = 40`, limit = 5 each. Four clients disconnect.
+New `clientCount = 4`, new computed limit = 10. All 4 remaining clients burst to 10
+simultaneous requests at the same moment → 40 in-flight, exactly at server capacity.
+Any brief measurement noise or one late-joining client pushes the server into overload.
+
+**The AIMD rule (Additive Increase, Multiplicative Decrease):**
+- **Decrease:** When the new limit is *lower* than the current limit, apply it immediately.
+  Fast response to overload is the priority.
+- **Increase:** When the new limit is *higher*, apply only `min(newLimit, currentLimit + step)`
+  per `SessionInfo` update, where `step` is a small additive value (default: 1 permit
+  per update).
+
+**Example with step = 1:**
+- Current limit = 5, new computed limit = 10.
+- Update 1: limit → `min(10, 5+1) = 6`
+- Update 2: limit → `min(10, 6+1) = 7`
+- ... converges to 10 over 5 response cycles.
+
+Under normal query load, `SessionInfo` responses arrive every few milliseconds, so convergence
+takes seconds at most — fast enough to be responsive, slow enough to avoid a burst spike.
+
+**Why additive (not multiplicative) increase:**
+Each `SessionInfo` update arrives quickly (with every operation). Adding 1 permit per
+response converges to the target in seconds. Multiplicative increase (e.g., double each
+time) would overshoot the target and cause oscillation. Additive increase is simple,
+predictable, and easy to test.
 
 **S5 — Log limit changes at INFO level**
 ```
@@ -504,10 +621,11 @@ cluster-aggregate counts via gossip.
 
 ### Questions
 
-**Q1 — Should `maxAdmission` be per-node or cluster-aggregate?**
-If per-node (what `SlotManager` knows about), then multiplying by `numOjpServers`
-gives the right cluster total. If aggregate, the multiplication is wrong.
-**This must be pinned in the design before implementation.**
+**Q1 — Resolved: `maxAdmission` is per-node**
+`totalSlots` in `SlotManager` equals `actualPoolSize`, which is the HikariCP connection
+pool size configured on this node (`CreateSlowQuerySegregationManagerAction`). Each OJP
+node tracks only its own pool. The formula correctly multiplies by `numOjpServers` to
+derive the total cluster budget available to one client.
 
 **Q2 — Should `clientCount` count `clientUUID` (JVMs) or sessions?**
 A JVM with a connection pool of 50 connections would inflate `clientCount` by 50 if
@@ -539,13 +657,15 @@ but needs explicit handling.
 |---|---|---|
 | Server protocol change | None | Two new `SessionInfo` int fields |
 | Client limit source | Inferred from rejections | Explicitly computed from server data |
+| `maxAdmission` scope | N/A | Per-node (= HikariCP pool size on that node) |
 | Activation | After N rejections | Immediately at `connect()` |
 | Deactivation | Probe logic / cooldown | Automatic via `clientCount` update |
 | Fairness | Unknown (guesswork) | Guaranteed by formula |
 | Multinode awareness | Requires per-node state | Built into formula via `numOjpServers` |
 | Stale data risk | High (only sees own rejections) | Low-Medium (clientCount lag) |
+| Concurrency control | Semaphore (blocking optional) | AtomicInteger counter (fail-fast, zero-latency) |
 | Implementation complexity | Medium (driver only) | Medium (driver + server tracking) |
-| Thundering-herd risk | Low (only activates under stress) | Present (on client disconnect surge) |
+| Thundering-herd risk | Low (only activates under stress) | Mitigated by AIMD step-limited increase |
 | Recommended for | No-protocol-change constraint | General case, new feature development |
 
 **Opinion:** The server-cooperative approach is materially better in production behavior.
