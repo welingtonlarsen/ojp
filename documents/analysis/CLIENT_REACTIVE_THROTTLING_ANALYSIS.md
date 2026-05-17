@@ -122,23 +122,22 @@ is actually struggling below its configured pool size. Neither alone is sufficie
 
 ---
 
-### Open Questions
+### Resolved Decisions
 
-**Q1 — Default configuration:** Should combined mode be on by default or off?
-Recommended: off by default (new behavior), opt-in via `ojp.jdbc.clientThrottle.mode`.
-Options: `off` (default), `proactive`, `reactive`, `combined`.
+**Q1 — Default configuration:** `combined` mode on by default.
+Property `ojp.jdbc.clientThrottle.mode` defaults to `combined`.
+Options: `off`, `proactive`, `reactive`, `combined`.
 
-**Q2 — Proactive-only without `observedPeak`:** Is `clientCount` tracking worth the
-server-side overhead if reactive mode is not used? Server needs a
-`ConcurrentHashMap<connHash, Set<clientUUID>>` updated on every session create/terminate.
-Acceptable overhead for the value it provides?
+**Q2 — `clientCount` tracking:** Yes, track distinct `clientUUID` values per `connHash`.
+Server maintains `ConcurrentHashMap<connHash, Map<clientUUID, refCount>>` updated on every
+session create/terminate. Overhead is acceptable.
 
-**Q3 — `observedPeak = 0` sentinel:** Means "no failure observed yet; use `maxAdmission`".
-Should a separate boolean field be clearer? Or is `0 = uninitialised` sufficient?
+**Q3 — `observedPeak = 0` sentinel:** `0 = uninitialised` is sufficient. When the server
+sends `0`, the driver treats reactive limit as unconstrained (`Integer.MAX_VALUE`).
 
-**Q4 — Reactive-only (skip `clientCount`):** Simpler server-side implementation — no
-client counting needed. Downside: no fairness guarantee between clients (one greedy
-client can saturate the remaining `observedPeak` capacity). Is fairness required in v1?
+**Q4 — Reactive-only fairness:** Reactive-only mode is valid for operators who only care
+about not overloading the DB and do not need fairness between clients. No-fairness caveat
+is documented. Combined mode (default) provides both fairness and adaptive protection.
 
 ---
 
