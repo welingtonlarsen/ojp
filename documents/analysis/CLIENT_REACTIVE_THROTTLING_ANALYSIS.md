@@ -679,6 +679,313 @@ per-node snapshot counts (conservative, safe) and evolving to cluster-aggregate 
 
 ---
 
+## Two Configurable Throttling Modes
+
+Based on the analysis above and the new reactive mode proposed below, the recommended
+design is two independently configurable driver modes:
+
+| Mode | Key property | Server changes needed |
+|---|---|---|
+| **Proactive** | Throttles from the very first `connect()` using `maxAdmission` and `clientCount` from `SessionInfo` | Two `int32` fields added to `SessionInfo` |
+| **Reactive** | Throttles only after observing real overload; uses `observedPeak` (adaptive effective capacity) from `SessionInfo` | `observedPeak` field added to `SessionInfo`; server tracks high-water mark with AIMD decay |
+
+Both modes share the same `AtomicInteger` concurrency counter and the same AIMD step-limited
+increase algorithm in the driver. The only difference is **where the limit comes from**:
+in proactive mode it is computed from static config (`maxAdmission`, `clientCount`); in
+reactive mode it is updated from the server's observed runtime behavior (`observedPeak`).
+
+A third option is **combined**: use `min(proactiveLimit, reactiveLimit)`. This gives
+fair-share distribution from day 1 (proactive) and automatically tightens during real
+overload events (reactive).
+
+---
+
+## Option: Reactive Mode with `observedPeak` — Deep Analysis
+
+### The Idea
+
+The server tracks how many concurrent requests it was successfully serving at the moment
+an admission timeout first occurred. That observed count — not the static configured
+pool size — is what gets sent to clients as the effective capacity signal.
+
+**Example:**
+- Server is configured with `maxAdmission = 100` (HikariCP pool size).
+- In production, the database becomes slow. When the server has 51 in-flight requests,
+  the 51st times out waiting for an admission slot.
+- The server records `observedPeak = 50` (what it was handling just before the failure).
+- Clients receive `observedPeak = 50` and recalculate their local limits downward.
+- After the DB recovers and traffic flows cleanly, `observedPeak` slowly climbs back
+  toward `maxAdmission`.
+
+This is the **TCP congestion window (CWND) analogy** applied to OJP admission control:
+shrink on loss, grow slowly during clean delivery.
+
+---
+
+### What the Server Would Need to Track
+
+The `SlotManager` already maintains `activeSlowOperations` and `activeFastOperations`
+as `AtomicInteger` counters that are incremented only after a semaphore is acquired
+(i.e., they reflect successfully-admitted operations, not waiting ones).
+
+To implement `observedPeak`, the server needs to add two pieces of state to `SlotManager`:
+
+1. **`highWaterMark` (AtomicInteger):** updated atomically whenever
+   `activeSlowOperations + activeFastOperations` reaches a new maximum.
+   ```java
+   // On every successful slot acquire:
+   int current = activeFastOperations.get() + activeSlowOperations.get();
+   highWaterMark.updateAndGet(prev -> Math.max(prev, current));
+   ```
+
+2. **`observedPeak` (AtomicInteger):** initialized to `totalSlots`. Updated when
+   a timeout fires (decrease) and incremented periodically on successful completions (increase).
+   ```java
+   // On admission timeout:
+   int currentActive = activeFastOperations.get() + activeSlowOperations.get();
+   observedPeak.updateAndGet(prev -> Math.min(prev, currentActive));
+
+   // On every K-th successful slot release (AIMD increase):
+   successCount.incrementAndGet();
+   if (successCount.get() % K == 0) {
+       observedPeak.updateAndGet(prev -> Math.min(totalSlots, prev + 1));
+   }
+   ```
+
+`observedPeak` is then sent in `SessionInfo` as a third `int32` field alongside
+`maxAdmission` and `clientCount`.
+
+---
+
+### Pros
+
+**1. Adapts to actual server capacity, not static config**
+The configured pool size is an upper bound; the real effective throughput depends on
+DB latency, query complexity, and backend load. An `observedPeak` of 50 under heavy DB
+load is a more honest signal than `maxAdmission = 100`.
+
+**2. No client tuning required**
+The proactive mode requires operators to understand the formula and the relationship
+between pool size, client count, and concurrency limits. The reactive mode is
+self-calibrating: it just reports what worked.
+
+**3. Responds to partial degradation**
+If the DB becomes slow without completely failing, admission timeouts start occurring
+below the configured pool size. The reactive mode catches this automatically; the
+proactive mode would not, since `maxAdmission` stays at the configured value.
+
+**4. Natural floor when combined with proactive mode**
+Used together: `effectiveLimit = min(proactiveLimit, reactiveLimit)`. The proactive
+mode prevents over-loading from day 1; the reactive mode tightens the limit when
+real overload is observed. Neither mode alone is sufficient.
+
+---
+
+### Cons
+
+**1. `observedPeak` reflects conditions at the moment of failure, not sustained capacity**
+If a single slow query happened to be holding a slot for 30 seconds and caused a timeout
+when the 2nd request arrived, the server would record `observedPeak = 1`. This is a
+dramatic over-reaction to a one-off event. The limit propagated to clients would be
+wildly too low.
+
+**2. The "false floor" problem — most critical risk**
+A transient event (DB GC pause, deployment, network hiccup, burst of slow queries)
+can drive `observedPeak` to a very low number. All clients then throttle hard.
+Even after the DB fully recovers, `observedPeak` stays low until the AIMD recovery
+ticks it back up. During that recovery window, the server is underutilized while
+clients wait for their limits to rise.
+
+**3. Recovery rate is hard to tune**
+- Recovery too fast → `observedPeak` rises quickly, burst risk returns.
+- Recovery too slow → clients stay under-throttled long after recovery, wasting capacity.
+- The "right" K (increment every K successful completions) depends on traffic rate,
+  which varies between deployments.
+
+**4. `observedPeak` is per-datasource but carries cross-datasource noise**
+If datasource A has a timeout because datasource B is consuming most of the server's
+thread pool, datasource A's `observedPeak` drops even though its own DB is healthy.
+This is a false signal. The `ConcurrencyThrottleInterceptor` (global gRPC gate) can
+also cause an effective admission timeout upstream; that should **not** update the
+per-datasource `observedPeak`.
+
+**5. Multiple concurrent timeouts race to update `observedPeak`**
+Under heavy load, dozens of threads may time out simultaneously and all attempt to
+update `observedPeak` at the same moment. Each thread reads a slightly different
+`currentActive` value (the count is changing as other threads complete).
+`AtomicInteger.updateAndGet(prev -> Math.min(prev, currentActive))` handles the
+CAS loop correctly, but the captured `currentActive` must be snapshotted *before*
+the CAS attempt to avoid seeing a stale value from a race.
+
+**6. Ambiguity about which timeout triggers the update**
+The `SlotManager` has three paths that result in a rejected admission:
+- Semaphore wait timeout (waited `timeoutMs`, timed out) — most meaningful.
+- Queue depth cap (`canWaitForSlot` returns false immediately) — request was not
+  admitted at all; `currentActive` at this point may be lower than `totalSlots`.
+  This is a useful signal but different in character from a wait timeout.
+- Semaphore `tryAcquire` returns false immediately (non-blocking fast-fail) — only
+  relevant in specific modes.
+
+Treating all three identically could produce confusing `observedPeak` values. The
+wait-timeout path is the most reliable signal.
+
+**7. SQS interaction: which active count to use?**
+With Slow Query Segregation enabled, the total active count is
+`activeSlow + activeFast + borrowedSlowToFast + borrowedFastToSlow`.
+A slow-lane timeout (the slow lane is full but fast lane is free) should not reduce
+`observedPeak` for the overall capacity — it reflects slow-query saturation, not
+total server overload. Whether to use lane-specific or total counts must be decided
+before implementation.
+
+---
+
+### Concerns
+
+**C1 — `observedPeak` can collapse to near-zero from a single bad event**
+A database restart, a GC pause, or a single extremely slow query can cause the first
+admission timeout to fire at a very low concurrent count. Example: only 3 requests are
+in flight when a 30-second query times out. `observedPeak` drops to 3. All clients
+receive a limit of `ceil(3 / clientCount) * numOjpServers`, which may be 1 per client.
+The system is now effectively single-threaded.
+
+**Mitigation:** Set a minimum floor for `observedPeak`:
+```java
+int floor = Math.max(1, (int)(totalSlots * 0.1)); // 10% of configured capacity
+observedPeak.updateAndGet(prev -> Math.max(floor, Math.min(prev, currentActive)));
+```
+This prevents collapse to near-zero while still allowing meaningful reduction under load.
+
+**C2 — Recovery mechanism adds server-side complexity**
+The proactive mode needs no server-side AIMD — the `observedPeak` field is passively
+read from `SlotManager`. The reactive mode requires active increment logic on the server.
+This is more invasive and must be tested under concurrent load to ensure the increment
+logic doesn't itself create races or unnecessary contention.
+
+**C3 — What is the right K for AIMD increase?**
+Incrementing `observedPeak` every `totalSlots` successful releases means approximately
+one increment per "full utilization cycle". This is a reasonable default but should be
+configurable. Setting K too low (e.g., 1) means `observedPeak` recovers in seconds;
+too high (e.g., 10 × `totalSlots`) means it takes minutes.
+
+**C4 — `observedPeak` lag between nodes in multinode**
+Each node tracks its own `observedPeak`. In a 3-node cluster, if Node A is under stress
+and reports `observedPeak = 10` while Nodes B and C report `observedPeak = 50`, clients
+connected to Node A will be throttled to 1/5 of what clients on B and C can send.
+This is actually correct behavior — it reflects the real capacity distribution.
+
+**C5 — The driver still needs to handle the case `observedPeak > maxAdmission`**
+If a misconfiguration causes `observedPeak` to exceed `maxAdmission` (unlikely but
+possible during initialization), the driver should cap it at `maxAdmission`.
+
+**C6 — Does `observedPeak = 0` mean "no failures" or "completely failed"?**
+The field needs a clear sentinel. Recommendation: `observedPeak = 0` means "no failures
+observed yet — driver should use `maxAdmission` for its calculation". `observedPeak > 0`
+means "this is the observed effective capacity".
+
+---
+
+### Suggestions
+
+**S1 — Initialize `observedPeak` to `maxAdmission`**
+Before any failure has been observed, `observedPeak` should equal the configured pool
+size. This makes the reactive mode equivalent to the proactive mode at startup.
+
+**S2 — Set a minimum floor at 10% of `maxAdmission`**
+Prevents total collapse from a single transient event:
+```java
+int floor = Math.max(1, (int)(totalSlots * 0.1));
+```
+
+**S3 — Apply AIMD on the server side (not the client side)**
+The AIMD increase logic belongs in `SlotManager`, not the driver. Each `SlotManager`
+instance independently increments `observedPeak` as its own traffic flows cleanly.
+The driver simply reads the latest value from `SessionInfo` and applies its own
+step-limited increase (from S4 of the proactive analysis) when the value grows.
+
+**S4 — Send both `maxAdmission` and `observedPeak` in `SessionInfo`**
+Give clients both signals. The driver can then compute:
+```java
+int effectiveAdmission = (observedPeak > 0) ? observedPeak : maxAdmission;
+int rawLimit = (int) Math.ceil((double) effectiveAdmission / clientCount) * numOjpServers;
+int limit = Math.max(1, (int)(rawLimit * 0.9)); // 10% safety headroom
+```
+Clients that don't understand `observedPeak` (old driver versions) fall back to
+`maxAdmission` transparently.
+
+**S5 — Use a sliding window for `observedPeak` decay**
+Instead of a strict floor, track the lowest observed failure count over the last N
+minutes. Older failures get discarded. This allows `observedPeak` to recover naturally
+as old bad events age out, without needing an explicit AIMD increment counter.
+Simpler to implement, but requires a time-based component in `SlotManager`.
+
+**S6 — Log `observedPeak` changes at WARN/INFO level**
+When `observedPeak` drops: log at WARN with the before/after count and the failure
+reason. When it recovers: log at INFO. This gives operators visibility into the
+adaptive behavior without requiring metrics tools.
+
+---
+
+### Questions
+
+**Q1 — Which timeout path should update `observedPeak`?**
+The wait-timeout path (semaphore waited `timeoutMs` and expired) is the clearest
+signal. Should the queue-depth rejection path also update `observedPeak`? The queue
+rejection fires before any wait starts, so `currentActive` at that point may be lower
+than the real ceiling. Including it risks false deflation.
+
+**Q2 — Should `observedPeak` be per-datasource (per `SlotManager`) or also aggregate across datasources?**
+Per-datasource is the right granularity for the fair-share formula, which is also
+per-datasource. But a global `ConcurrencyThrottleInterceptor` rejection (server-global
+gRPC gate) cannot be attributed to a single datasource. Should global gRPC rejections
+set a separate global `observedConcurrencyPeak` that is used as a secondary cap?
+
+**Q3 — With SQS enabled, should `observedPeak` use total slots or per-lane slots?**
+A slow-lane timeout (slow lane saturated, fast lane idle) does not represent total
+server overload. Using total active count (`activeSlow + activeFast`) is safer.
+Using per-lane counts is more precise but harder to communicate to clients in a
+single integer.
+
+**Q4 — What is the right K for the increment period?**
+Suggestion: default to `K = totalSlots × 2` (one increment per two full utilization
+cycles). This gives conservative recovery. Make it configurable via a new server
+property: `ojp.server.admissionControl.observedPeakRecoveryFactor`.
+
+**Q5 — Should the reactive mode be enabled independently of the proactive mode?**
+Possible configurations:
+- `proactive + reactive` (combined, recommended): uses `min(proactive, reactive)`.
+- `proactive only`: uses `maxAdmission` + `clientCount` formula.
+- `reactive only`: ignores `maxAdmission`, uses only `observedPeak`.
+- `off`: no client-side throttling.
+
+---
+
+### Opinion
+
+The `observedPeak` idea is conceptually sound and directly analogous to TCP's
+congestion window (CWND): shrink on evidence of overload, grow slowly when clean.
+TCP is the gold standard for adaptive rate control and this approach borrows its
+core insight.
+
+**Confidence: High (85%) that the idea is worth implementing.** The main implementation
+risk is the "false floor" collapse (Concern C1) and the recovery rate tuning (Concern C3).
+Both are solvable, and the suggested mitigations (10% floor, configurable K, sliding
+window option) directly address them.
+
+**Recommended design for v1:**
+1. Add `observedPeak` as a third `int32` to `SessionInfo` (alongside existing `maxAdmission` and `clientCount`).
+2. Initialize `observedPeak = maxAdmission` in `SlotManager`.
+3. On wait-timeout: `observedPeak = max(floor, min(observedPeak, currentActive))`.
+4. AIMD increase: every `totalSlots × 2` successful releases, `observedPeak = min(maxAdmission, observedPeak + 1)`.
+5. Driver uses `effectiveAdmission = observedPeak` (or `maxAdmission` if `observedPeak == 0`) in the fair-share formula.
+6. Both proactive and reactive modes enabled by default; operator can turn either off.
+
+The "reactive only" mode (skip `clientCount` tracking entirely) is simpler to implement
+and may be the right first cut: clients adapt to `observedPeak` without the server
+needing to count distinct `clientUUID`s. The downside is that fairness between clients
+is not guaranteed — one greedy client can still saturate the remaining capacity.
+
+---
+
 ## Relationship to Existing Analysis
 
 This document is a deep dive into one specific variant described in Option Set 2 / Option 3
@@ -693,11 +1000,13 @@ The client infers the throttle signal from existing rejection exceptions.
 
 ## Summary
 
-| Dimension | Assessment |
-|---|---|
-| Implementation effort | Medium (client-only change, but state management is non-trivial) |
-| Server changes required | None |
-| Risk level | Low–Medium (can be off by default; staged rollout is easy) |
-| Main risk | Over-throttling after recovery; interaction with multinode failover |
-| Recommended first step | Proof-of-concept per-`connHash` semaphore in the driver, triggered by N consecutive `RESOURCE_EXHAUSTED` signals, with a shallow bounded queue and short wait timeout |
-| Needs more design | Deactivation probe logic; multinode awareness; in-transaction bypass |
+| Dimension | Proactive Mode | Reactive Mode (`observedPeak`) | Combined |
+|---|---|---|---|
+| Server changes required | Two `int32` fields in `SessionInfo` | Three `int32` fields in `SessionInfo` + server AIMD logic | Three fields + AIMD |
+| Activation | Immediately at `connect()` | After first admission timeout | Immediately, adapts on timeout |
+| Limit source | Static config (`maxAdmission`) | Observed runtime capacity | `min(proactive, reactive)` |
+| Adapts to DB load changes | No | Yes | Yes |
+| Fairness between clients | Guaranteed by formula | Not guaranteed | Guaranteed |
+| Collapse risk from transient event | Low | Medium (mitigated by 10% floor) | Low |
+| Implementation complexity | Medium | Medium–High | High |
+| Recommended | Yes (general case) | Yes (adaptive environments) | Yes (best of both) |
