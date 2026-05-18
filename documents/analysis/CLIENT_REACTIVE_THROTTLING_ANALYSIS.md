@@ -174,3 +174,14 @@ Complex, race-prone, high overhead. Replaced by `AtomicInteger` counter + `volat
 ### Floor division (`maxAdmission / clientCount`)
 **Why dropped:** Permanently wastes capacity. `floor(20/7) = 2`, 6 slots idle even
 at full load. Replaced by ceiling division + 10% safety headroom.
+
+### gRPC built-in controls
+Three native gRPC-Java mechanisms were considered:
+
+| Mechanism | Why dropped |
+|---|---|
+| `NettyServerBuilder.maxConcurrentCallsPerConnection(N)` | Caps concurrent HTTP/2 streams per TCP connection (global), not per `connHash`/datasource. No per-resource fairness, no AIMD, client receives an abrupt `RST_STREAM` rather than a structured `SQLException`. |
+| HTTP/2 flow control (transport byte windows) | Controls bytes in flight, not request count. Not applicable for "max N concurrent SQL executions per datasource". |
+| `ClientInterceptor` wrapping every `newCall` | This is exactly what `ClientThrottleManager` does — gRPC provides the hook but not the pre-built implementation. There is no off-the-shelf gRPC interceptor that is informed by server-side `SessionInfo` signals (`maxAdmission`, `observedPeak`, `clientCount`). |
+
+All three lack the ability to scope the limit to a specific `connHash` and to incorporate the server's actual admission capacity into the client-side budget. The `ClientThrottleManager` approach was chosen because it uses the gRPC-recommended interceptor pattern while adding per-datasource, server-cooperative logic.
