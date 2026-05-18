@@ -64,6 +64,8 @@ public class QueryPerformanceMonitor {
 
     // Global average update interval configuration
     private final long updateGlobalAvgIntervalSeconds;
+    private final SlowQueryClassificationMode classificationMode;
+    private final long slowQueryThresholdMs;
     private final TimeProvider timeProvider;
     private volatile long lastGlobalAvgUpdateTime = 0L;
     private volatile int lastKnownUniqueQueryCount = 0;
@@ -72,7 +74,7 @@ public class QueryPerformanceMonitor {
      * Creates a QueryPerformanceMonitor with default settings (always update global average).
      */
     public QueryPerformanceMonitor() {
-        this(0L, TimeProvider.SYSTEM);
+        this(0L, TimeProvider.SYSTEM, SlowQueryClassificationMode.RELATIVE_AVERAGE, 1000L);
     }
 
     /**
@@ -82,7 +84,21 @@ public class QueryPerformanceMonitor {
      *                                      If 0, global average is updated on every query (default behavior).
      */
     public QueryPerformanceMonitor(long updateGlobalAvgIntervalSeconds) {
-        this(updateGlobalAvgIntervalSeconds, TimeProvider.SYSTEM);
+        this(updateGlobalAvgIntervalSeconds, TimeProvider.SYSTEM,
+                SlowQueryClassificationMode.RELATIVE_AVERAGE, 1000L);
+    }
+
+    /**
+     * Creates a QueryPerformanceMonitor with update interval and classification settings.
+     *
+     * @param updateGlobalAvgIntervalSeconds interval in seconds between global average updates.
+     * @param classificationMode classification mode for slow operation detection.
+     * @param slowQueryThresholdMs deterministic threshold in milliseconds for ABSOLUTE_THRESHOLD mode.
+     */
+    public QueryPerformanceMonitor(long updateGlobalAvgIntervalSeconds,
+                                   SlowQueryClassificationMode classificationMode,
+                                   long slowQueryThresholdMs) {
+        this(updateGlobalAvgIntervalSeconds, TimeProvider.SYSTEM, classificationMode, slowQueryThresholdMs);
     }
 
     /**
@@ -93,8 +109,25 @@ public class QueryPerformanceMonitor {
      * @param timeProvider provider for current time (allows mocking in tests)
      */
     public QueryPerformanceMonitor(long updateGlobalAvgIntervalSeconds, TimeProvider timeProvider) {
+        this(updateGlobalAvgIntervalSeconds, timeProvider, SlowQueryClassificationMode.RELATIVE_AVERAGE, 1000L);
+    }
+
+    /**
+     * Creates a QueryPerformanceMonitor with specified settings and time provider (for testing).
+     *
+     * @param updateGlobalAvgIntervalSeconds interval in seconds between global average updates.
+     * @param timeProvider provider for current time (allows mocking in tests)
+     * @param classificationMode classification mode for slow operation detection.
+     * @param slowQueryThresholdMs deterministic threshold in milliseconds for ABSOLUTE_THRESHOLD mode.
+     */
+    public QueryPerformanceMonitor(long updateGlobalAvgIntervalSeconds, TimeProvider timeProvider,
+                                   SlowQueryClassificationMode classificationMode, long slowQueryThresholdMs) {
         this.updateGlobalAvgIntervalSeconds = updateGlobalAvgIntervalSeconds;
         this.timeProvider = timeProvider;
+        this.classificationMode = classificationMode != null
+                ? classificationMode
+                : SlowQueryClassificationMode.RELATIVE_AVERAGE;
+        this.slowQueryThresholdMs = Math.max(0L, slowQueryThresholdMs);
         this.lastGlobalAvgUpdateTime = timeProvider.currentTimeSeconds();
     }
 
@@ -194,18 +227,28 @@ public class QueryPerformanceMonitor {
      * @return true if the operation is classified as slow, false otherwise
      */
     public boolean isSlowOperation(String operationHash) {
-        double operationAverage = getOperationAverageTime(operationHash);
-        double overallAverage = getOverallAverageExecutionTime();
+        PerformanceRecord record = operationRecords.get(operationHash);
+        if (record == null) {
+            return false;
+        }
 
+        double operationAverage = record.getAverageExecutionTime();
+        boolean isSlow;
+        if (classificationMode == SlowQueryClassificationMode.ABSOLUTE_THRESHOLD) {
+            isSlow = operationAverage >= slowQueryThresholdMs;
+            log.debug("Operation {} classification: mode={}, average={}ms, threshold={}ms, slow={}",
+                    operationHash, classificationMode, operationAverage, slowQueryThresholdMs, isSlow);
+            return isSlow;
+        }
+
+        double overallAverage = getOverallAverageExecutionTime();
         // If overall average is 0 or very small, consider all operations as fast initially
         if (overallAverage <= 1.0) {
             return false;
         }
-
-        boolean isSlow = operationAverage >= (overallAverage * 2.0);
-        log.debug("Operation {} classification: average={}ms, overall={}ms, slow={}",
-                 operationHash, operationAverage, overallAverage, isSlow);
-
+        isSlow = operationAverage >= (overallAverage * 2.0);
+        log.debug("Operation {} classification: mode={}, average={}ms, overall={}ms, slow={}",
+                operationHash, classificationMode, operationAverage, overallAverage, isSlow);
         return isSlow;
     }
 
@@ -250,6 +293,14 @@ public class QueryPerformanceMonitor {
      */
     public long getTotalExecutionCount() {
         return totalOperations.get();
+    }
+
+    public SlowQueryClassificationMode getClassificationMode() {
+        return classificationMode;
+    }
+
+    public long getSlowQueryThresholdMs() {
+        return slowQueryThresholdMs;
     }
 
     /**
