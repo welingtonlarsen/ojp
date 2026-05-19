@@ -76,7 +76,7 @@ public class Statement implements java.sql.Statement {
         if (throttle != null) {
             if (!throttle.tryAcquire(mode, inTransaction)) {
                 throw new java.sql.SQLTransientException(
-                        "Client throttle limit reached; request rejected to protect OJP server");
+                        "Client throttle limit reached; request rejected to avoid overloading the database");
             }
             acquired = true;
         }
@@ -104,7 +104,7 @@ public class Statement implements java.sql.Statement {
         if (throttle != null) {
             if (!throttle.tryAcquire(mode, inTransaction)) {
                 throw new java.sql.SQLTransientException(
-                        "Client throttle limit reached; request rejected to protect OJP server");
+                        "Client throttle limit reached; request rejected to avoid overloading the database");
             }
             acquired = true;
         }
