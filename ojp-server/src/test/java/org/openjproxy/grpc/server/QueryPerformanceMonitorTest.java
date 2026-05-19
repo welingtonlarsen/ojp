@@ -102,10 +102,10 @@ class QueryPerformanceMonitorTest {
 
         assertTrue(relativeMonitor.isSlowOperation("candidate")); // enter slow at baseline*5
 
-        relativeMonitor.recordExecutionTime("candidate", 0.0); // avg becomes 40
+        relativeMonitor.recordExecutionTime("candidate", 2.5); // avg becomes 40.5
         assertTrue(relativeMonitor.isSlowOperation("candidate")); // remain slow (between baseline*3 and baseline*5)
 
-        relativeMonitor.recordExecutionTime("candidate", 0.0); // avg becomes 32
+        relativeMonitor.recordExecutionTime("candidate", 1.0); // avg becomes 32.6
         assertFalse(relativeMonitor.isSlowOperation("candidate")); // recover below minimumSlowQueryMs
     }
 

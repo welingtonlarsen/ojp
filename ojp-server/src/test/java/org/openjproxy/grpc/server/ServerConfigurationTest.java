@@ -179,6 +179,17 @@ class ServerConfigurationTest {
     }
 
     @Test
+    void testRecoveryMultiplierEqualToSlowMultiplierFallsBack() {
+        System.setProperty("ojp.server.slowQuerySegregation.slowMultiplier", "5.0");
+        System.setProperty("ojp.server.slowQuerySegregation.recoveryMultiplier", "5.0");
+
+        ServerConfiguration config = new ServerConfiguration();
+
+        assertEquals(ServerConfiguration.DEFAULT_SLOW_QUERY_RECOVERY_MULTIPLIER,
+                config.getSlowQueryRecoveryMultiplier(), 0.001);
+    }
+
+    @Test
     void testInvalidIntegerValues() {
         System.setProperty("ojp.server.port", "invalid");
         System.setProperty("ojp.prometheus.port", "not-a-number");

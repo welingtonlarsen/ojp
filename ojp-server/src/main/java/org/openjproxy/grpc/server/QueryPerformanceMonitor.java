@@ -69,7 +69,7 @@ public class QueryPerformanceMonitor {
             return currentlyClassifiedAsSlow;
         }
 
-        public boolean setCurrentlyClassifiedAsSlow(boolean slow) {
+        public boolean updateSlowClassification(boolean slow) {
             lock.lock();
             try {
                 if (this.currentlyClassifiedAsSlow == slow) {
@@ -268,7 +268,7 @@ public class QueryPerformanceMonitor {
             boolean shouldRecover = operationAverageMs < minimumSlowQueryMs
                     || operationAverageMs <= baseline * recoveryMultiplier;
             if (shouldRecover) {
-                boolean changed = record.setCurrentlyClassifiedAsSlow(false);
+                boolean changed = record.updateSlowClassification(false);
                 if (changed) {
                     log.debug("Query recovered to fast: hash={}, avgMs={}, baselineMs={}, recoveryMultiplier={}",
                             operationHash, operationAverageMs, baseline, recoveryMultiplier);
@@ -281,7 +281,7 @@ public class QueryPerformanceMonitor {
         boolean shouldEnterSlow = operationAverageMs >= minimumSlowQueryMs
                 && operationAverageMs >= baseline * slowMultiplier;
         if (shouldEnterSlow) {
-            boolean changed = record.setCurrentlyClassifiedAsSlow(true);
+            boolean changed = record.updateSlowClassification(true);
             if (changed) {
                 log.debug("Query classified as slow: hash={}, avgMs={}, baselineMs={}, multiplier={}",
                         operationHash, operationAverageMs, baseline, slowMultiplier);
@@ -297,16 +297,19 @@ public class QueryPerformanceMonitor {
      */
     public double getFastBaselineMs() {
         long nowMillis = currentTimeMillis();
-        if (baselineRefreshIntervalSeconds == 0
-                || (nowMillis - lastBaselineRefreshMillis) >= baselineRefreshIntervalSeconds * 1000L) {
+        if (shouldRefreshBaseline(nowMillis)) {
             synchronized (this) {
-                if (baselineRefreshIntervalSeconds == 0
-                        || (nowMillis - lastBaselineRefreshMillis) >= baselineRefreshIntervalSeconds * 1000L) {
+                if (shouldRefreshBaseline(nowMillis)) {
                     refreshFastBaseline(nowMillis);
                 }
             }
         }
         return fastBaselineMs;
+    }
+
+    private boolean shouldRefreshBaseline(long nowMillis) {
+        return baselineRefreshIntervalSeconds == 0
+                || (nowMillis - lastBaselineRefreshMillis) >= baselineRefreshIntervalSeconds * 1000L;
     }
 
     private void refreshFastBaseline(long nowMillis) {
@@ -329,6 +332,8 @@ public class QueryPerformanceMonitor {
     }
 
     private double calculatePercentile(double[] sortedValues, int percentile) {
+        // Nearest-rank percentile selection (1-based rank mapped to 0-based array index).
+        // This intentionally chooses an observed fast-shape average instead of interpolation.
         int rank = (int) Math.ceil((percentile / 100.0) * sortedValues.length) - 1;
         int index = Math.max(0, Math.min(rank, sortedValues.length - 1));
         return sortedValues[index];

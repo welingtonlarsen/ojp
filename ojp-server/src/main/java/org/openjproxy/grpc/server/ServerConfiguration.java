@@ -505,9 +505,13 @@ public class ServerConfiguration {
     private double getRecoveryMultiplierProperty(String key, double defaultValue, double slowMultiplier) {
         double value = getDoubleProperty(key, defaultValue);
         if (value <= 1.0 || value >= slowMultiplier) {
-            logger.warn("Invalid value for property '{}': {}, must be > 1.0 and < slowMultiplier={}, using default: {}",
-                    key, value, slowMultiplier, defaultValue);
-            return defaultValue;
+            double fallback = defaultValue;
+            if (fallback <= 1.0 || fallback >= slowMultiplier) {
+                fallback = (slowMultiplier + 1.0) / 2.0;
+            }
+            logger.warn("Invalid value for property '{}': {}, must be > 1.0 and < slowMultiplier={}, using fallback: {}",
+                    key, value, slowMultiplier, fallback);
+            return fallback;
         }
         return value;
     }
