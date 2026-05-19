@@ -63,6 +63,24 @@ public class Statement implements java.sql.Statement {
         }
     }
 
+    /**
+     * Attempts to acquire a throttle slot before executing a statement.
+     * Returns true if a slot was acquired (caller must call releaseThrottle after the work),
+     * or false if throttling is disabled.
+     * Throws SQLTransientException immediately if the limit is reached.
+     */
+    private boolean acquireThrottle(ClientThrottleManager throttle, ClientThrottleMode mode,
+                                    boolean inTransaction) throws SQLException {
+        if (throttle == null) {
+            return false;
+        }
+        if (!throttle.tryAcquire(mode, inTransaction)) {
+            throw new java.sql.SQLTransientException(
+                    "Client throttle limit reached; request rejected to avoid overloading the database");
+        }
+        return true;
+    }
+
     @Override
     public ResultSet executeQuery(String sql) throws SQLException {
         log.debug("executeQuery: {}", sql);
@@ -72,14 +90,7 @@ public class Statement implements java.sql.Statement {
         // getAutoCommit() may throw SQLException; evaluate before acquiring a slot
         // so that release() is never called without a matching acquire.
         boolean inTransaction = !this.connection.getAutoCommit();
-        boolean acquired = false;
-        if (throttle != null) {
-            if (!throttle.tryAcquire(mode, inTransaction)) {
-                throw new java.sql.SQLTransientException(
-                        "Client throttle limit reached; request rejected to avoid overloading the database");
-            }
-            acquired = true;
-        }
+        boolean acquired = acquireThrottle(throttle, mode, inTransaction);
         try {
             Iterator<OpResult> itResults = this.statementService.executeQuery(this.connection.getSession(), sql,
                     EMPTY_PARAMETERS_LIST, this.statementUUID, this.properties);
@@ -100,14 +111,7 @@ public class Statement implements java.sql.Statement {
         // getAutoCommit() may throw SQLException; evaluate before acquiring a slot
         // so that release() is never called without a matching acquire.
         boolean inTransaction = !this.connection.getAutoCommit();
-        boolean acquired = false;
-        if (throttle != null) {
-            if (!throttle.tryAcquire(mode, inTransaction)) {
-                throw new java.sql.SQLTransientException(
-                        "Client throttle limit reached; request rejected to avoid overloading the database");
-            }
-            acquired = true;
-        }
+        boolean acquired = acquireThrottle(throttle, mode, inTransaction);
         try {
             OpResult result = this.statementService.executeUpdate(this.connection.getSession(), sql, EMPTY_PARAMETERS_LIST,
                     this.statementUUID, this.properties);
