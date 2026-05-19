@@ -37,6 +37,12 @@ public class ServerConfiguration {
     private static final String SLOW_QUERY_UPDATE_GLOBAL_AVG_INTERVAL_KEY = "ojp.server.slowQuerySegregation.updateGlobalAvgInterval";
     private static final String SLOW_QUERY_CLASSIFICATION_MODE_KEY = "ojp.server.slowQuerySegregation.classificationMode";
     private static final String SLOW_QUERY_THRESHOLD_MS_KEY = "ojp.server.slowQuerySegregation.slowQueryThresholdMs";
+    private static final String SLOW_QUERY_MINIMUM_SLOW_QUERY_MS_KEY = "ojp.server.slowQuerySegregation.minimumSlowQueryMs";
+    private static final String SLOW_QUERY_SLOW_MULTIPLIER_KEY = "ojp.server.slowQuerySegregation.slowMultiplier";
+    private static final String SLOW_QUERY_RECOVERY_MULTIPLIER_KEY = "ojp.server.slowQuerySegregation.recoveryMultiplier";
+    private static final String SLOW_QUERY_MIN_SAMPLES_KEY = "ojp.server.slowQuerySegregation.minSamples";
+    private static final String SLOW_QUERY_BASELINE_PERCENTILE_KEY = "ojp.server.slowQuerySegregation.baselinePercentile";
+    private static final String SLOW_QUERY_BASELINE_REFRESH_INTERVAL_SECONDS_KEY = "ojp.server.slowQuerySegregation.baselineRefreshIntervalSeconds";
     private static final String ADMISSION_CONTROL_MAX_QUEUE_DEPTH_KEY = "ojp.server.admissionControl.maxQueueDepth";
     private static final String LEGACY_SLOW_QUERY_MAX_QUEUE_DEPTH_KEY = "ojp.server.slowQuerySegregation.maxQueueDepth";
     private static final String MAX_CONCURRENT_REQUESTS_KEY = "ojp.server.maxConcurrentRequests";
@@ -118,8 +124,15 @@ public class ServerConfiguration {
     public static final long DEFAULT_SLOW_QUERY_SLOW_SLOT_TIMEOUT = 120000; // 120 seconds slow slot timeout
     public static final long DEFAULT_SLOW_QUERY_FAST_SLOT_TIMEOUT = 60000; // 60 seconds fast slot timeout
     public static final long DEFAULT_SLOW_QUERY_UPDATE_GLOBAL_AVG_INTERVAL = 300; // 300 seconds (5 minutes) global average update interval
-    public static final SlowQueryClassificationMode DEFAULT_SLOW_QUERY_CLASSIFICATION_MODE = SlowQueryClassificationMode.RELATIVE_AVERAGE;
+    public static final SlowQueryClassificationMode DEFAULT_SLOW_QUERY_CLASSIFICATION_MODE = SlowQueryClassificationMode.RELATIVE_FAST_BASELINE;
     public static final long DEFAULT_SLOW_QUERY_THRESHOLD_MS = QueryPerformanceMonitor.DEFAULT_SLOW_QUERY_THRESHOLD_MS;
+    public static final long DEFAULT_SLOW_QUERY_MINIMUM_SLOW_QUERY_MS = QueryPerformanceMonitor.DEFAULT_MINIMUM_SLOW_QUERY_MS;
+    public static final double DEFAULT_SLOW_QUERY_SLOW_MULTIPLIER = QueryPerformanceMonitor.DEFAULT_SLOW_MULTIPLIER;
+    public static final double DEFAULT_SLOW_QUERY_RECOVERY_MULTIPLIER = QueryPerformanceMonitor.DEFAULT_RECOVERY_MULTIPLIER;
+    public static final int DEFAULT_SLOW_QUERY_MIN_SAMPLES = QueryPerformanceMonitor.DEFAULT_MIN_SAMPLES;
+    public static final int DEFAULT_SLOW_QUERY_BASELINE_PERCENTILE = QueryPerformanceMonitor.DEFAULT_BASELINE_PERCENTILE;
+    public static final long DEFAULT_SLOW_QUERY_BASELINE_REFRESH_INTERVAL_SECONDS =
+            QueryPerformanceMonitor.DEFAULT_BASELINE_REFRESH_INTERVAL_SECONDS;
     public static final int DEFAULT_ADMISSION_CONTROL_MAX_QUEUE_DEPTH = 0; // 0 means auto-calculate from total slots
     public static final int DEFAULT_MAX_CONCURRENT_REQUESTS = 200;
     public static final String DEFAULT_DRIVERS_PATH = "./ojp-libs"; // Default external libraries directory path
@@ -203,6 +216,12 @@ public class ServerConfiguration {
     private final long slowQueryUpdateGlobalAvgInterval;
     private final SlowQueryClassificationMode slowQueryClassificationMode;
     private final long slowQueryThresholdMs;
+    private final long slowQueryMinimumSlowQueryMs;
+    private final double slowQuerySlowMultiplier;
+    private final double slowQueryRecoveryMultiplier;
+    private final int slowQueryMinSamples;
+    private final int slowQueryBaselinePercentile;
+    private final long slowQueryBaselineRefreshIntervalSeconds;
     private final int admissionControlMaxQueueDepth;
     private final int maxConcurrentRequests;
     private final String driversPath;
@@ -287,6 +306,17 @@ public class ServerConfiguration {
         this.slowQueryClassificationMode = getSlowQueryClassificationModeProperty(SLOW_QUERY_CLASSIFICATION_MODE_KEY,
                 DEFAULT_SLOW_QUERY_CLASSIFICATION_MODE);
         this.slowQueryThresholdMs = getNonNegativeLongProperty(SLOW_QUERY_THRESHOLD_MS_KEY, DEFAULT_SLOW_QUERY_THRESHOLD_MS);
+        this.slowQueryMinimumSlowQueryMs = getNonNegativeLongProperty(SLOW_QUERY_MINIMUM_SLOW_QUERY_MS_KEY,
+                DEFAULT_SLOW_QUERY_MINIMUM_SLOW_QUERY_MS);
+        this.slowQuerySlowMultiplier = getGreaterThanDoubleProperty(SLOW_QUERY_SLOW_MULTIPLIER_KEY,
+                DEFAULT_SLOW_QUERY_SLOW_MULTIPLIER, 1.0);
+        this.slowQueryRecoveryMultiplier = getRecoveryMultiplierProperty(SLOW_QUERY_RECOVERY_MULTIPLIER_KEY,
+                DEFAULT_SLOW_QUERY_RECOVERY_MULTIPLIER, slowQuerySlowMultiplier);
+        this.slowQueryMinSamples = getMinimumIntProperty(SLOW_QUERY_MIN_SAMPLES_KEY, DEFAULT_SLOW_QUERY_MIN_SAMPLES, 1);
+        this.slowQueryBaselinePercentile = getBoundedIntProperty(SLOW_QUERY_BASELINE_PERCENTILE_KEY,
+                DEFAULT_SLOW_QUERY_BASELINE_PERCENTILE, 1, 99);
+        this.slowQueryBaselineRefreshIntervalSeconds = getNonNegativeLongProperty(
+                SLOW_QUERY_BASELINE_REFRESH_INTERVAL_SECONDS_KEY, DEFAULT_SLOW_QUERY_BASELINE_REFRESH_INTERVAL_SECONDS);
         this.admissionControlMaxQueueDepth = getNonNegativeIntProperty(ADMISSION_CONTROL_MAX_QUEUE_DEPTH_KEY,
                 getNonNegativeIntProperty(LEGACY_SLOW_QUERY_MAX_QUEUE_DEPTH_KEY, DEFAULT_ADMISSION_CONTROL_MAX_QUEUE_DEPTH));
         this.maxConcurrentRequests = getNonNegativeIntProperty(MAX_CONCURRENT_REQUESTS_KEY, DEFAULT_MAX_CONCURRENT_REQUESTS);
@@ -452,6 +482,36 @@ public class ServerConfiguration {
         }
     }
 
+    private double getGreaterThanDoubleProperty(String key, double defaultValue, double minExclusive) {
+        double value = getDoubleProperty(key, defaultValue);
+        if (value <= minExclusive) {
+            logger.warn("Invalid value for property '{}': {}, must be > {}, using default: {}",
+                    key, value, minExclusive, defaultValue);
+            return defaultValue;
+        }
+        return value;
+    }
+
+    private int getMinimumIntProperty(String key, int defaultValue, int minInclusive) {
+        int value = getIntProperty(key, defaultValue);
+        if (value < minInclusive) {
+            logger.warn("Invalid value for property '{}': {}, must be >= {}, using default: {}",
+                    key, value, minInclusive, defaultValue);
+            return defaultValue;
+        }
+        return value;
+    }
+
+    private double getRecoveryMultiplierProperty(String key, double defaultValue, double slowMultiplier) {
+        double value = getDoubleProperty(key, defaultValue);
+        if (value <= 1.0 || value >= slowMultiplier) {
+            logger.warn("Invalid value for property '{}': {}, must be > 1.0 and < slowMultiplier={}, using default: {}",
+                    key, value, slowMultiplier, defaultValue);
+            return defaultValue;
+        }
+        return value;
+    }
+
     private SlowQueryClassificationMode getSlowQueryClassificationModeProperty(String key,
                                                                                SlowQueryClassificationMode defaultValue) {
         String rawValue = getStringProperty(key, defaultValue.name());
@@ -508,6 +568,12 @@ public class ServerConfiguration {
         logger.info("  Slow Query Update Global Avg Interval: {} seconds", slowQueryUpdateGlobalAvgInterval);
         if (slowQuerySegregationEnabled) {
             logger.info("  SQS Classification Mode: {}", slowQueryClassificationMode);
+            logger.info("  SQS Minimum Slow Query: {} ms", slowQueryMinimumSlowQueryMs);
+            logger.info("  SQS Slow Multiplier: {}", slowQuerySlowMultiplier);
+            logger.info("  SQS Recovery Multiplier: {}", slowQueryRecoveryMultiplier);
+            logger.info("  SQS Min Samples: {}", slowQueryMinSamples);
+            logger.info("  SQS Baseline Percentile: {}", slowQueryBaselinePercentile);
+            logger.info("  SQS Baseline Refresh Interval: {} seconds", slowQueryBaselineRefreshIntervalSeconds);
             logger.info("  SQS Slow Query Threshold: {} ms", slowQueryThresholdMs);
         }
         logger.info("  Admission Control Max Queue Depth: {} (0 means auto)", admissionControlMaxQueueDepth);
@@ -657,6 +723,30 @@ public class ServerConfiguration {
 
     public long getSlowQueryThresholdMs() {
         return slowQueryThresholdMs;
+    }
+
+    public long getSlowQueryMinimumSlowQueryMs() {
+        return slowQueryMinimumSlowQueryMs;
+    }
+
+    public double getSlowQuerySlowMultiplier() {
+        return slowQuerySlowMultiplier;
+    }
+
+    public double getSlowQueryRecoveryMultiplier() {
+        return slowQueryRecoveryMultiplier;
+    }
+
+    public int getSlowQueryMinSamples() {
+        return slowQueryMinSamples;
+    }
+
+    public int getSlowQueryBaselinePercentile() {
+        return slowQueryBaselinePercentile;
+    }
+
+    public long getSlowQueryBaselineRefreshIntervalSeconds() {
+        return slowQueryBaselineRefreshIntervalSeconds;
     }
 
     public int getAdmissionControlMaxQueueDepth() {
