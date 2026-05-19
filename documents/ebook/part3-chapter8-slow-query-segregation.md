@@ -206,12 +206,18 @@ A longer idle timeout (like 30 seconds) makes borrowing less aggressive, which m
 
 Slow-query classification supports two modes:
 
-- `RELATIVE_AVERAGE` (default): adaptive mode based on historical operation average versus overall average.
+- `RELATIVE_FAST_BASELINE` (default): adaptive mode that compares each query-shape average against a fast-query baseline (median by default) built only from currently-fast query-shapes.
 - `ABSOLUTE_THRESHOLD`: deterministic mode based on a fixed latency boundary, with an inclusive check (`operationAverageMs >= slowQueryThresholdMs`).
 
 ```properties
-# Adaptive default mode (backward compatible)
-ojp.server.slowQuerySegregation.classificationMode=RELATIVE_AVERAGE
+# Adaptive default mode
+ojp.server.slowQuerySegregation.classificationMode=RELATIVE_FAST_BASELINE
+ojp.server.slowQuerySegregation.minimumSlowQueryMs=100
+ojp.server.slowQuerySegregation.slowMultiplier=5.0
+ojp.server.slowQuerySegregation.recoveryMultiplier=3.0
+ojp.server.slowQuerySegregation.minSamples=20
+ojp.server.slowQuerySegregation.baselinePercentile=50
+ojp.server.slowQuerySegregation.baselineRefreshIntervalSeconds=10
 
 # Deterministic benchmark-friendly mode
 ojp.server.slowQuerySegregation.classificationMode=ABSOLUTE_THRESHOLD
@@ -219,6 +225,8 @@ ojp.server.slowQuerySegregation.slowQueryThresholdMs=1000
 ```
 
 Use `ABSOLUTE_THRESHOLD` when you already know what “slow” means for your workload (for example, controlled benchmarks with a fixed latency SLO).
+
+In `RELATIVE_FAST_BASELINE`, already-classified slow query-shapes are excluded from baseline computation. This avoids the classic self-pollution problem where one very slow query-shape inflates the baseline and hides itself.
 
 ### Complete Configuration Example
 
