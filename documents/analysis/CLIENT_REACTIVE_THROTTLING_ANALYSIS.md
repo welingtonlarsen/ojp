@@ -229,15 +229,24 @@ and a more stable `observedPeak` signal.
 
 **`maxAdmission` and SQS slot split:**
 
-`maxAdmission` = `SlotManager.totalSlots` = full HikariCP pool size.
-When SQS is enabled with `slowSlotPercentage > 0` (default 20%), only
-`100 - slowSlotPercentage`% of those slots serve fast queries. The client throttle budget
-is computed from the full `maxAdmission`, so clients may occasionally push slightly more
-fast queries than the fast lane can absorb concurrently. This is acceptable because:
-1. Slow queries that do land in the fast lane will raise the average and eventually be
-   reclassified to the slow lane by SQS.
-2. Any resulting admission timeout will feed back through `observedPeak` to reduce the
-   client limit.
+When SQS is inactive (`slowSlotPercentage = 0`), `maxAdmission = SlotManager.totalSlots` =
+full HikariCP pool size.
+When SQS is active (`slowSlotPercentage > 0`, default 20%), fast queries compete only for the
+fast-lane slots (80% of the pool). `ConnectAction` therefore sends
+`maxAdmission = SlotManager.fastSlots` so the client's proactive limit is based on the actual
+fast-lane capacity rather than the full pool. Without this correction the 90% safety margin
+(proactive formula uses `0.9 × maxAdmission / clientCount`) could exceed the fast slot quota,
+causing immediate admission timeouts.
+
+> **Bug fixed (2026-05):** An earlier version incorrectly sent `maxAdmission = totalSlots`
+> regardless of the SQS split, causing `proactiveLimit` to exceed `fastSlots` and triggering
+> repeated fast-lane timeouts. `ConnectAction` now sends `fastSlots` when `slowSlots > 0`.
+
+A second fix in the same release corrected `ClientThrottleManager.updateFromSessionInfo()`:
+it now skips the update (instead of resetting `reactiveLimit` to `MAX_VALUE`) when
+`maxAdmission = 0` in the incoming `SessionInfo`. `executeUpdate` and `executeQuery`
+responses carry a minimal `SessionInfo` with `maxAdmission = 0`; the previous reset silently
+undid every `notifyServerOverload()` adjustment on the first successful SQL response.
 
 ### Recommendations when running both features together
 

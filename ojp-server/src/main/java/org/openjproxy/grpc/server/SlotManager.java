@@ -360,4 +360,18 @@ public class SlotManager {
     public long getIdleTimeoutMs() { return idleTimeoutMs; }
     public int getMaxWaitQueueDepth() { return maxWaitQueueDepth; }
     public int getObservedPeak() { return observedPeak.get(); }
+
+    /**
+     * Returns the admission slot count to advertise to JDBC clients for throttle budget
+     * calculations.
+     *
+     * <p>When SQS is active ({@code slowSlots > 0}) fast queries compete only for the
+     * fast-lane capacity, so the value returned is {@link #getFastSlots()}. Without SQS
+     * all slots serve fast queries, so this equals {@link #getTotalSlots()}.</p>
+     *
+     * @return the effective slot count for client-side admission throttling
+     */
+    public int getEffectiveMaxAdmission() {
+        return slowSlots > 0 ? fastSlots : totalSlots;
+    }
 }

@@ -31,8 +31,19 @@ public class ClientThrottleManager {
     /**
      * Update limits from a fresh SessionInfo.
      * AIMD: decrease immediately; increase capped at currentLimit + 1.
+     *
+     * <p>Only connect responses carry throttle data (maxAdmission &gt; 0).
+     * executeUpdate/executeQuery responses use a minimal SessionInfo without throttle fields
+     * (maxAdmission = 0). When maxAdmission is zero, there is nothing to update, so this
+     * method returns immediately, preserving any reactive limit already set by
+     * {@link #notifyServerOverload()}.</p>
      */
     public void updateFromSessionInfo(SessionInfo sessionInfo) {
+        if (sessionInfo.getMaxAdmission() <= 0) {
+            // No throttle data in this SessionInfo (e.g., executeUpdate/executeQuery response).
+            // Skip to preserve any reactive limit set by notifyServerOverload().
+            return;
+        }
         int clientCount = Math.max(1, sessionInfo.getClientCount());
         int maxAdmission = sessionInfo.getMaxAdmission();
         int observedPeak = sessionInfo.getObservedPeak();

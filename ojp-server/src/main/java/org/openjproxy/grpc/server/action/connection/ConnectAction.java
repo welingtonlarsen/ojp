@@ -324,7 +324,7 @@ public class ConnectAction implements Action<ConnectionDetails, SessionInfo> {
         int observedPeakValue = 0;
         AdmissionControlManager acm = context.getAdmissionControlManagers().get(connHash);
         if (acm != null && acm.isEnabled() && acm.getSlotManager() != null) {
-            maxAdmission = acm.getSlotManager().getTotalSlots();
+            maxAdmission = acm.getSlotManager().getEffectiveMaxAdmission();
             observedPeakValue = acm.getSlotManager().getObservedPeak();
         }
 
