@@ -158,6 +158,36 @@ public class ClientThrottleManager {
         return inFlight.get();
     }
 
+    /**
+     * Called when the server rejects a request with RESOURCE_EXHAUSTED (slot admission timeout).
+     * Applies a multiplicative decrease to the reactive limit (AIMD: halve on overload).
+     *
+     * <p>Example: reactiveLimit = 8 → notifyServerOverload() → reactiveLimit = 4.
+     * The next request will be blocked client-side instead of hitting the still-overloaded server.
+     * If the reactive limit was uninitialised (MAX_VALUE), it is seeded from half the proactive
+     * limit so the client immediately backs off to a reasonable level.</p>
+     *
+     * <p>Thread safety: reads and writes to {@code reactiveLimit} and {@code lastReactiveLimit}
+     * are individually atomic (volatile), but the read-compute-write sequence is not atomic.
+     * This is intentional: concurrent calls both halve the limit, producing a more aggressive
+     * decrease that is desirable when multiple threads observe the same overload. This matches
+     * the eventually-consistent AIMD design used throughout this class.</p>
+     */
+    public void notifyServerOverload() {
+        int current = reactiveLimit;
+        int newLimit;
+        if (current == Integer.MAX_VALUE) {
+            // Reactive limit was uninitialised — seed from half the proactive limit as a starting point.
+            int pl = proactiveLimit;
+            newLimit = pl == Integer.MAX_VALUE ? 1 : Math.max(1, pl / 2);
+        } else {
+            newLimit = Math.max(1, current / 2);
+        }
+        reactiveLimit = newLimit;
+        lastReactiveLimit = newLimit;
+        log.debug("ClientThrottleManager notifyServerOverload: reactiveLimit {} -> {}", current, newLimit);
+    }
+
     public int getProactiveLimit() {
         return proactiveLimit;
     }

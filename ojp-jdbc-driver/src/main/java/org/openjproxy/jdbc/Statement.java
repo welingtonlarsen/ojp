@@ -7,6 +7,8 @@ import com.openjproxy.grpc.OpResult;
 import com.openjproxy.grpc.ParameterValue;
 import com.openjproxy.grpc.ResourceType;
 import com.openjproxy.grpc.TargetCall;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -69,7 +71,7 @@ public class Statement implements java.sql.Statement {
      * or false if throttling is disabled.
      * Throws SQLTransientException immediately if the limit is reached.
      */
-    private boolean acquireThrottle(ClientThrottleManager throttle, ClientThrottleMode mode,
+    protected boolean acquireThrottle(ClientThrottleManager throttle, ClientThrottleMode mode,
                                     boolean inTransaction) throws SQLException {
         if (throttle == null) {
             return false;
@@ -79,6 +81,21 @@ public class Statement implements java.sql.Statement {
                     "Client throttle limit reached; request rejected to avoid overloading the database");
         }
         return true;
+    }
+
+    /**
+     * If the exception is a RESOURCE_EXHAUSTED status from the server, notifies the throttle
+     * manager to halve its reactive limit (AIMD multiplicative decrease) so that the next
+     * request is rejected client-side instead of hitting the still-overloaded server.
+     * The original exception is always returned to the caller for rethrowing.
+     */
+    protected StatusRuntimeException onServerOverload(ClientThrottleManager throttle, ClientThrottleMode mode,
+                                                      StatusRuntimeException sre) {
+        if (throttle != null && mode != ClientThrottleMode.OFF
+                && sre.getStatus().getCode() == Status.Code.RESOURCE_EXHAUSTED) {
+            throttle.notifyServerOverload();
+        }
+        return sre;
     }
 
     @Override
@@ -95,6 +112,8 @@ public class Statement implements java.sql.Statement {
             Iterator<OpResult> itResults = this.statementService.executeQuery(this.connection.getSession(), sql,
                     EMPTY_PARAMETERS_LIST, this.statementUUID, this.properties);
             return new ResultSet(itResults, this.statementService, this);
+        } catch (StatusRuntimeException sre) {
+            throw onServerOverload(throttle, mode, sre);
         } finally {
             if (acquired) {
                 throttle.release(mode, inTransaction);
@@ -117,6 +136,8 @@ public class Statement implements java.sql.Statement {
                     this.statementUUID, this.properties);
             this.connection.setSession(result.getSession());
             return result.getIntValue();
+        } catch (StatusRuntimeException sre) {
+            throw onServerOverload(throttle, mode, sre);
         } finally {
             if (acquired) {
                 throttle.release(mode, inTransaction);
