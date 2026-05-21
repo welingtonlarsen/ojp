@@ -14,12 +14,12 @@ limits its own concurrent in-flight count to its fair share of the server's real
 Shorter queues mean lower admission-wait latency, fewer timeouts, and no thundering-herd
 spikes when load increases suddenly.
 
-**Without client throttling (problem):** 50 threads across 5 app servers hit one OJP node
-at once → the node's 10-slot pool is overwhelmed → 40 requests queue or timeout → the
+**Without client throttling (problem):** 240 threads across 12 app servers hit one OJP node
+at once (example node configured with a 120-slot pool) → the pool is overwhelmed → many requests queue or timeout → the
 server's situation gets worse, not better.
 
-**With client throttling (solution):** each app server caps itself at `ceil(10/5)×1×0.9 ≈ 1`
-concurrent request → at most 5–6 in-flight across the cluster → the pool stays within
+**With client throttling (solution):** each app server caps itself at `ceil(120/12)×1×0.9 = 9`
+concurrent requests → at most ~108 in-flight across the cluster → the pool stays within
 capacity, admission timeouts stop, and throughput is maintained.
 
 ## Simple Flow (with examples)
@@ -38,13 +38,13 @@ flowchart TD
 ```
 
 **Example 1 (normal):**
-- Server says `maxAdmission=10`, `clientCount=5`, `numServers=1`
-- Limit = `ceil(10/5) × 1 × 0.9 = 1`
-- Each client sends up to 1 concurrent request; pressure stays low.
+- Server says `maxAdmission=180`, `clientCount=12`, `numServers=2`
+- Limit = `ceil(180/12) × 2 × 0.9 = 27`
+- Each client sends up to 27 concurrent requests; pressure stays controlled.
 
 **Example 2 (overload signal):**
 - A request gets `RESOURCE_EXHAUSTED` from server.
-- Driver halves reactive limit (for example `4 → 2`).
+- Driver halves reactive limit (for example `40 → 20`).
 - Next bursts are rejected in the client first, so fewer requests hit an overloaded server.
 
 ---
@@ -67,9 +67,9 @@ flowchart TD
 
 ---
 
-## Current Design: Two Configurable Modes
+## Current Design: Three Configurable Modes
 
-Both modes use the same `AtomicInteger` fail-fast counter in the driver (no blocking,
+All three modes use the same `AtomicInteger` fail-fast counter in the driver (no blocking,
 no Semaphore) and AIMD step-limited increase. They differ only in where the limit comes from.
 
 ### Protocol additions to `SessionInfo`
