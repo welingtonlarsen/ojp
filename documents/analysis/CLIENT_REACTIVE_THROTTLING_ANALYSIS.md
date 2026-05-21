@@ -26,14 +26,14 @@ capacity, admission timeouts stop, and throughput is maintained.
 
 ```mermaid
 flowchart TD
-    A[Connect to OJP server] --> B[Driver receives SessionInfo<br/>maxAdmission, clientCount, observedPeak]
-    B --> C[Compute local limit<br/>ceil(effectiveAdmission/clientCount) × numServers × 0.9]
-    C --> D{Before each SQL call<br/>inFlight < limit?}
+    A["Connect to OJP server"] --> B["Driver receives SessionInfo: maxAdmission, clientCount, observedPeak"]
+    B --> C["Compute local limit (fair share with 10% safety margin)"]
+    C --> D{"Before each SQL call, is inFlight < limit?"}
     D -- Yes --> E[Send request to server]
-    D -- No --> F[Reject locally<br/>SQLTransientException]
-    E --> G{Server returns RESOURCE_EXHAUSTED?}
-    G -- No --> H[Release slot<br/>continue normal traffic]
-    G -- Yes --> I[Halve reactive limit<br/>AIMD decrease]
+    D -- No --> F["Reject locally: SQLTransientException"]
+    E --> G{"Did server return RESOURCE_EXHAUSTED?"}
+    G -- No --> H["Release slot and continue"]
+    G -- Yes --> I["Halve reactive limit (AIMD decrease)"]
     I --> F
 ```
 
