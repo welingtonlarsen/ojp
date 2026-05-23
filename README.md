@@ -152,7 +152,7 @@ If Docker is not available in your environment, you can run OJP Server as a stan
 ## Documentation
 ### High Level Solution
 
-<img src="documents/designs/ojp_high_level_design.gif" alt="OJP High Level Design" />
+<img src="documents/images/open_j_proxy_overview.png" alt="Open J Proxy Overview" />
 
 * The OJP JDBC driver is used as a replacement for the native JDBC driver(s) previously used with minimal change, the only change required being prefixing the connection URL with `ojp_`. 
 * **Open Source**: OJP is an open-source project that is free to use, modify, and distribute.
