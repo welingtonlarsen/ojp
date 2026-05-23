@@ -28,7 +28,9 @@ Let's start with the foundational settings that control how your OJP server oper
 
 The server also exposes a separate Prometheus metrics endpoint on port 9159 by default. This separation is intentional—it allows you to apply different network policies and access controls to your operational metrics versus your database traffic. In production, you might expose the gRPC port only to your application network while making the Prometheus endpoint available to your monitoring infrastructure on a separate network segment.
 
-By default, OJP uses Java virtual threads for gRPC request handling. This gives high concurrency without tuning a large platform thread pool. If you need conventional platform threads, set `ojp.server.virtualThreads.enabled=false`; in that mode, `ojp.server.threadPoolSize` (default 200) controls concurrency.
+By default, OJP uses a fixed platform thread pool for gRPC request handling, with `ojp.server.threadPoolSize` (default 200) controlling concurrency. If you want to use Java virtual threads instead — which can give high concurrency without tuning a large platform thread pool — set `ojp.server.virtualThreads.enabled=true`.
+
+> **Why virtual threads are off by default:** During heavy-concurrency testing with the current OJP code, virtual threads proved less efficient than platform threads, so they are disabled by default. This may change as the OJP code evolves — further investigation is needed to determine whether future upgrades could make virtual threads beneficial.
 
 **[IMAGE PROMPT: Create a technical server architecture diagram showing OJP Server as a central component with two network interfaces: one labeled "gRPC Port :1059" (shown with database connection icons) and another labeled "Prometheus Port :9159" (shown with metrics/monitoring icons). Include a thread pool visualization showing multiple worker threads (default: 200) handling concurrent requests. Use professional blue and gray color scheme with clear labels and connection lines. Style: Modern technical architecture diagram.]**
 

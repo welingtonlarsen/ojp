@@ -222,7 +222,7 @@ The OJP Server can be configured using system properties. Common options include
 | `ojp.server.port` | `1059` | gRPC server port |
 | `ojp.prometheus.port` | `9159` | Prometheus metrics port |
 | `ojp.libs.path` | `./ojp-libs` | Path to external libraries directory (for proprietary drivers) |
-| `ojp.server.virtualThreads.enabled` | `true` | Enable Java virtual threads for gRPC request handling |
+| `ojp.server.virtualThreads.enabled` | `false` | Enable Java virtual threads for gRPC request handling |
 | `ojp.server.threadPoolSize` | `200` | Fixed thread pool size when virtual threads are disabled |
 | `ojp.max.request.size` | `4194304` | Maximum request size in bytes |
 | `ojp.connection.idle.timeout` | `30000` | Connection idle timeout in milliseconds |
