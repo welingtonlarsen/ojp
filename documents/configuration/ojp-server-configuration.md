@@ -15,7 +15,7 @@ The server supports configuration through both JVM system properties and environ
 |--------------------------------------|--------------------------------------|---------|-----------|--------------------------------------------------------|---------|
 | `ojp.server.port`                    | `OJP_SERVER_PORT`                    | int     | 1059      | gRPC server port                                       | 0.2.0-beta |
 | `ojp.prometheus.port`                | `OJP_PROMETHEUS_PORT`                | int     | 9159      | Prometheus metrics HTTP server port                    | 0.2.0-beta |
-| `ojp.server.virtualThreads.enabled`  | `OJP_SERVER_VIRTUALTHREADS_ENABLED`  | boolean | true      | Use Java virtual threads for gRPC request handling     | 0.4.11-beta |
+| `ojp.server.virtualThreads.enabled`  | `OJP_SERVER_VIRTUALTHREADS_ENABLED`  | boolean | false     | Use Java virtual threads for gRPC request handling     | 0.4.11-beta |
 | `ojp.server.threadPoolSize`          | `OJP_SERVER_THREADPOOLSIZE`          | int     | 200       | Fixed thread pool size when virtual threads are disabled | 0.2.0-beta |
 | `ojp.server.maxRequestSize`          | `OJP_SERVER_MAXREQUESTSIZE`          | int     | 4194304   | Maximum request size in bytes (4MB)                    | 0.2.0-beta |
 | `ojp.server.connectionIdleTimeout`   | `OJP_SERVER_CONNECTIONIDLETIMEOUT`   | long    | 30000     | Connection idle timeout in milliseconds                | 0.2.0-beta |
@@ -31,6 +31,8 @@ OJP uses a layered concurrency model:
 Because the global cap is shared across all datasources and clients, tripping it rejects requests indiscriminately and can cause unrelated clients to throttle. Size it generously — a rule of thumb is **sum of per-datasource `(poolSize + maxQueueDepth)` × 1.5** — so the per-datasource caps reject first under expected load. Treat the global cap as JVM self-protection, not workload shaping; if you find yourself tuning it to shape traffic, tune the per-datasource limits instead.
 
 
+
+> **Note on `ojp.server.virtualThreads.enabled`:** Virtual threads are disabled by default because, during heavy-concurrency testing with the current OJP code, they proved less efficient than platform threads. This may change as the OJP code evolves — further investigation is needed to determine whether future improvements could make virtual threads beneficial. You can still opt in by setting this property to `true`.
 
 ### Logging Settings
 
