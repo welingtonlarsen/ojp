@@ -365,13 +365,22 @@ public class SlotManager {
      * Returns the admission slot count to advertise to JDBC clients for throttle budget
      * calculations.
      *
-     * <p>When SQS is active ({@code slowSlots > 0}) fast queries compete only for the
-     * fast-lane capacity, so the value returned is {@link #getFastSlots()}. Without SQS
-     * all slots serve fast queries, so this equals {@link #getTotalSlots()}.</p>
+     * <p>Returns {@link #getTotalSlots()} — the full admission-control pool, not just the
+     * fast lane. Rationale:</p>
+     * <ul>
+     *   <li>Lane borrowing (idle donor → busy borrower) means a fast query can land on a
+     *       slow slot and vice versa, so the realistic concurrency ceiling is the total
+     *       pool size.</li>
+     *   <li>Advertising only {@code fastSlots} understates capacity by ~20–30% under
+     *       default SQS configuration and contributes to throughput cliffs at near-peak
+     *       load.</li>
+     *   <li>Cross-lane contamination (a slow-lane overload affecting fast-lane budget)
+     *       is now handled separately by lane-tagged overload notifications.</li>
+     * </ul>
      *
-     * @return the effective slot count for client-side admission throttling
+     * @return the total admission slot count for client-side throttle budget
      */
     public int getEffectiveMaxAdmission() {
-        return slowSlots > 0 ? fastSlots : totalSlots;
+        return totalSlots;
     }
 }
