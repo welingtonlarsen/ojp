@@ -63,7 +63,7 @@ public class CommandExecutionHelper {
         // session creation and released only on session termination), do not acquire
         // another per-statement slot — that would double-count the same session and
         // unnecessarily compete for capacity with brand new sessions.
-        final boolean sessionHoldsPermit = sessionAlreadyHoldsPermit(context, request);
+        final boolean sessionHoldsPermit = sessionHoldsPermit(context, request);
 
         long sqlStartNs = System.nanoTime();
         try {
@@ -178,7 +178,7 @@ public class CommandExecutionHelper {
      * control is disabled — in all of those cases the normal per-statement
      * acquisition path remains appropriate.
      */
-    private static boolean sessionAlreadyHoldsPermit(ActionContext context, StatementRequest request) {
+    private static boolean sessionHoldsPermit(ActionContext context, StatementRequest request) {
         try {
             if (StringUtils.isBlank(request.getSession().getSessionUUID())) {
                 return false;
@@ -188,8 +188,7 @@ public class CommandExecutionHelper {
             return session != null && session.hasConnectionPermit();
         } catch (Exception e) {
             // Defensive: never block statement execution on a lookup error.
-            log.debug("Failed to check session permit ownership, falling back to per-statement slot: {}",
-                    e.getMessage());
+            log.debug("Failed to check session permit ownership, falling back to per-statement slot", e);
             return false;
         }
     }
